@@ -2910,8 +2910,58 @@ def _parse_boolish(value: Any, default: bool = True) -> bool:
     return default
 
 
+_GATEWAY_SCOPED_GROWTH_MCP_PACKAGES = {
+    "growth-mcp",
+    "sales-mcp",
+    "verbiflow-mcp",
+}
+
+
+def _mcp_command_parts(config: dict) -> list[str]:
+    parts: list[str] = []
+    command = config.get("command")
+    if command is not None:
+        parts.append(str(command))
+    args = config.get("args") or []
+    if isinstance(args, list):
+        parts.extend(str(arg) for arg in args)
+    else:
+        parts.append(str(args))
+    return parts
+
+
+def _is_growth_mcp_gateway_candidate(name: str, config: dict) -> bool:
+    server_name = name.strip().lower()
+    if server_name in {"growth", *_GATEWAY_SCOPED_GROWTH_MCP_PACKAGES}:
+        return True
+    for part in _mcp_command_parts(config):
+        lowered = part.lower()
+        for package_name in _GATEWAY_SCOPED_GROWTH_MCP_PACKAGES:
+            if re.search(rf"(^|[/@:]){re.escape(package_name)}($|[/@:\s])", lowered):
+                return True
+    return False
+
+
 def _should_use_per_auth_scope(name: str, config: dict) -> bool:
     return _parse_boolish(config.get("per_auth_scope", False), default=False)
+
+
+def _assert_gateway_growth_mcp_is_explicitly_scoped(name: str, config: dict) -> None:
+    if os.getenv("_HERMES_GATEWAY") != "1":
+        return
+    if "per_auth_scope" in config:
+        return
+    if not _is_growth_mcp_gateway_candidate(name, config):
+        return
+    raise ValueError(
+        f"MCP server '{name}' looks like Growth MCP but is missing "
+        "per_auth_scope: true while Mochi is running in gateway mode. "
+        "Refusing to start an unscoped Growth MCP process because it could "
+        "share the Mac mini account's browser/auth state across Slack, "
+        "WhatsApp, or iMessage users. Run 'hermes config migrate' or set "
+        f"mcp_servers.{name}.per_auth_scope: true and "
+        f"mcp_servers.{name}.gateway_browser_provider: chrome|safari."
+    )
 
 
 _UTILITY_CAPABILITY_METHODS = {
@@ -3123,6 +3173,7 @@ async def _discover_and_register_server(name: str, config: dict) -> List[str]:
     Returns list of registered tool names.
     """
     connect_timeout = config.get("connect_timeout", _DEFAULT_CONNECT_TIMEOUT)
+    _assert_gateway_growth_mcp_is_explicitly_scoped(name, config)
     per_auth_scope = _should_use_per_auth_scope(name, config)
     connect_config = _bootstrap_gateway_config(config) if per_auth_scope else config
     server = await asyncio.wait_for(
