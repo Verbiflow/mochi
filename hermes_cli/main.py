@@ -5946,9 +5946,7 @@ def _update_via_zip(args):
     from urllib.request import urlretrieve
 
     branch = "main"
-    zip_url = (
-        f"https://github.com/NousResearch/hermes-agent/archive/refs/heads/{branch}.zip"
-    )
+    zip_url = f"https://github.com/Verbiflow/mochi/archive/refs/heads/{branch}.zip"
 
     print("→ Downloading latest version...")
     try:
@@ -6270,17 +6268,37 @@ def _restore_stashed_changes(
 
 
 # =========================================================================
-# Fork detection and upstream management for `hermes update`
+# Repository detection and upstream management for `hermes update`
 # =========================================================================
 
 OFFICIAL_REPO_URLS = {
+    "https://github.com/Verbiflow/mochi.git",
+    "git@github.com:Verbiflow/mochi.git",
+    "https://github.com/Verbiflow/mochi",
+    "git@github.com:Verbiflow/mochi",
+}
+OFFICIAL_REPO_URL = "https://github.com/Verbiflow/mochi.git"
+OFFICIAL_REPO_NAME = "Verbiflow/mochi"
+LEGACY_HERMES_REPO_URLS = {
     "https://github.com/NousResearch/hermes-agent.git",
     "git@github.com:NousResearch/hermes-agent.git",
     "https://github.com/NousResearch/hermes-agent",
     "git@github.com:NousResearch/hermes-agent",
 }
-OFFICIAL_REPO_URL = "https://github.com/NousResearch/hermes-agent.git"
+MOCHI_MIGRATION_SCRIPT_URL = (
+    "https://raw.githubusercontent.com/Verbiflow/mochi/main/scripts/migrate_to_mochi.sh"
+)
 SKIP_UPSTREAM_PROMPT_FILE = ".skip_upstream_prompt"
+
+
+def _normalize_repo_url(url: Optional[str]) -> str:
+    """Normalize a git remote URL for exact repository identity checks."""
+    if not url:
+        return ""
+    normalized = url.strip().rstrip("/")
+    if normalized.endswith(".git"):
+        normalized = normalized[:-4]
+    return normalized
 
 
 def _get_origin_url(git_cmd: list[str], cwd: Path) -> Optional[str]:
@@ -6303,17 +6321,46 @@ def _is_fork(origin_url: Optional[str]) -> bool:
     """Check if the origin remote points to a fork (not the official repo)."""
     if not origin_url:
         return False
-    # Normalize URL for comparison (strip trailing .git if present)
-    normalized = origin_url.rstrip("/")
-    if normalized.endswith(".git"):
-        normalized = normalized[:-4]
+    normalized = _normalize_repo_url(origin_url)
     for official in OFFICIAL_REPO_URLS:
-        official_normalized = official.rstrip("/")
-        if official_normalized.endswith(".git"):
-            official_normalized = official_normalized[:-4]
-        if normalized == official_normalized:
+        if normalized == _normalize_repo_url(official):
             return False
     return True
+
+
+def _is_legacy_hermes_repo_url(url: Optional[str]) -> bool:
+    """Return True when a remote still points at the pre-Mochi upstream."""
+    normalized = _normalize_repo_url(url)
+    return any(
+        normalized == _normalize_repo_url(legacy)
+        for legacy in LEGACY_HERMES_REPO_URLS
+    )
+
+
+def _print_mochi_migration_guidance(gateway_mode: bool) -> None:
+    print("✗ This checkout still points at the legacy Hermes upstream:")
+    print("  https://github.com/NousResearch/hermes-agent")
+    print()
+    print("Mochi updates are served from:")
+    print(f"  {OFFICIAL_REPO_URL}")
+    print()
+    if gateway_mode:
+        print("The gateway cannot migrate remotes unattended.")
+        print("Run this on the host, then retry /update:")
+    else:
+        print("Run one of these from a shell:")
+    print("  hermes update --migrate-to-mochi")
+    print(f"  curl -fsSL {MOCHI_MIGRATION_SCRIPT_URL} | bash")
+
+
+def _exit_if_legacy_hermes_origin(
+    origin_url: Optional[str],
+    *,
+    gateway_mode: bool,
+) -> None:
+    if _is_legacy_hermes_repo_url(origin_url):
+        _print_mochi_migration_guidance(gateway_mode=gateway_mode)
+        sys.exit(1)
 
 
 def _has_upstream_remote(git_cmd: list[str], cwd: Path) -> bool:
@@ -6377,32 +6424,21 @@ def _mark_skip_upstream_prompt():
         pass
 
 
-def _sync_fork_with_upstream(git_cmd: list[str], cwd: Path) -> bool:
-    """Attempt to push updated main to origin (sync fork).
+def _maybe_offer_mochi_upstream(
+    git_cmd: list[str],
+    cwd: Path,
+    *,
+    gateway_mode: bool,
+) -> None:
+    """Offer Verbiflow/mochi as upstream for user forks without syncing code.
 
-    Returns True if push succeeded, False otherwise.
+    `hermes update` always updates from origin/main. For forks, upstream is
+    only advisory so update never pulls from or force-pushes to a repository
+    the operator did not explicitly choose.
     """
-    try:
-        result = subprocess.run(
-            git_cmd + ["push", "origin", "main", "--force-with-lease"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+    if gateway_mode:
+        return
 
-
-def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
-    """Check if fork is behind upstream and sync if safe.
-
-    This implements the fork upstream sync logic:
-    - If upstream remote doesn't exist, ask user if they want to add it
-    - Compare origin/main with upstream/main
-    - If origin/main is strictly behind upstream/main, pull from upstream
-    - Try to sync fork back to origin if possible
-    """
     has_upstream = _has_upstream_remote(git_cmd, cwd)
 
     if not has_upstream:
@@ -6410,14 +6446,13 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
         if _should_skip_upstream_prompt():
             return
 
-        # Ask user if they want to add upstream
         print()
-        print("ℹ Your fork is not tracking the official Hermes repository.")
-        print("  This means you may miss updates from NousResearch/hermes-agent.")
+        print(f"ℹ Your fork is not tracking the official Mochi repository.")
+        print(f"  This means you may miss updates from {OFFICIAL_REPO_NAME}.")
         print()
         try:
             response = (
-                input("Add official repo as 'upstream' remote? [Y/n]: ").strip().lower()
+                input("Add Mochi repo as 'upstream' remote? [Y/n]: ").strip().lower()
             )
         except (EOFError, KeyboardInterrupt):
             print()
@@ -6426,23 +6461,43 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
         if response in {"", "y", "yes"}:
             print("→ Adding upstream remote...")
             if _add_upstream_remote(git_cmd, cwd):
-                print(
-                    "  ✓ Added upstream: https://github.com/NousResearch/hermes-agent.git"
-                )
+                print(f"  ✓ Added upstream: {OFFICIAL_REPO_URL}")
                 has_upstream = True
             else:
                 print("  ✗ Failed to add upstream remote. Skipping upstream sync.")
                 return
         else:
             print(
-                "  Skipped. Run 'git remote add upstream https://github.com/NousResearch/hermes-agent.git' to add later."
+                f"  Skipped. Run 'git remote add upstream {OFFICIAL_REPO_URL}' to add later."
             )
             _mark_skip_upstream_prompt()
             return
 
+    try:
+        upstream_url_result = subprocess.run(
+            git_cmd + ["remote", "get-url", "upstream"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        upstream_url = (
+            upstream_url_result.stdout.strip()
+            if upstream_url_result.returncode == 0
+            else None
+        )
+    except Exception:
+        upstream_url = None
+
+    if _is_legacy_hermes_repo_url(upstream_url):
+        print()
+        print("⚠ The 'upstream' remote still points at legacy Hermes.")
+        print("  Mochi update will not use it.")
+        print(f"  Replace it with: git remote set-url upstream {OFFICIAL_REPO_URL}")
+        return
+
     # Fetch upstream
     print()
-    print("→ Fetching upstream...")
+    print("→ Fetching Mochi upstream...")
     try:
         subprocess.run(
             git_cmd + ["fetch", "upstream", "--quiet"],
@@ -6451,7 +6506,7 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
             check=True,
         )
     except subprocess.CalledProcessError:
-        print("  ✗ Failed to fetch upstream. Skipping upstream sync.")
+        print("  ✗ Failed to fetch upstream. Skipping upstream check.")
         return
 
     # Compare origin/main with upstream/main
@@ -6461,51 +6516,17 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
     )
 
     if origin_ahead < 0 or upstream_ahead < 0:
-        print("  ✗ Could not compare branches. Skipping upstream sync.")
+        print("  ✗ Could not compare branches. Skipping upstream check.")
         return
 
-    # If origin/main has commits not on upstream, don't trample
-    if origin_ahead > 0:
-        print()
-        print(f"ℹ Your fork has {origin_ahead} commit(s) not on upstream.")
-        print("  Skipping upstream sync to preserve your changes.")
-        print("  If you want to merge upstream changes, run:")
-        print("    git pull upstream main")
-        return
-
-    # If upstream is not ahead, fork is up to date
     if upstream_ahead == 0:
-        print("  ✓ Fork is up to date with upstream")
+        print("  ✓ Fork is up to date with Mochi upstream")
         return
 
-    # origin/main is strictly behind upstream/main (can fast-forward)
     print()
-    print(f"→ Fork is {upstream_ahead} commit(s) behind upstream")
-    print("→ Pulling from upstream...")
-
-    try:
-        subprocess.run(
-            git_cmd + ["pull", "--ff-only", "upstream", "main"],
-            cwd=cwd,
-            check=True,
-        )
-    except subprocess.CalledProcessError:
-        print(
-            "  ✗ Failed to pull from upstream. You may need to resolve conflicts manually."
-        )
-        return
-
-    print("  ✓ Updated from upstream")
-
-    # Try to sync fork back to origin
-    print("→ Syncing fork...")
-    if _sync_fork_with_upstream(git_cmd, cwd):
-        print("  ✓ Fork synced with upstream")
-    else:
-        print(
-            "  ℹ Got updates from upstream but couldn't push to fork (no write access?)"
-        )
-        print("    Your local repo is updated, but your fork on GitHub may be behind.")
+    print(f"ℹ Mochi upstream has {upstream_ahead} commit(s) not in your fork.")
+    print("  Update your fork intentionally, for example:")
+    print("    git pull --ff-only upstream main")
 
 
 def _invalidate_update_cache():
@@ -7058,28 +7079,17 @@ def _cmd_update_check():
     if sys.platform == "win32":
         git_cmd = ["git", "-c", "windows.appendAtomically=false"]
 
-    # Fetch both origin and upstream; prefer upstream as the canonical reference
-    print("→ Fetching from upstream...")
+    origin_url = _get_origin_url(git_cmd, PROJECT_ROOT)
+    _exit_if_legacy_hermes_origin(origin_url, gateway_mode=False)
+
+    print("→ Fetching from origin...")
     fetch_result = subprocess.run(
-        git_cmd + ["fetch", "upstream"],
+        git_cmd + ["fetch", "origin"],
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
     )
-    if fetch_result.returncode != 0:
-        # Fallback to origin if upstream doesn't exist
-        print("→ Fetching from origin...")
-        fetch_result = subprocess.run(
-            git_cmd + ["fetch", "origin"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        upstream_exists = False
-        compare_branch = "origin/main"
-    else:
-        upstream_exists = True
-        compare_branch = "upstream/main"
+    compare_branch = "origin/main"
 
     if fetch_result.returncode != 0:
         stderr = fetch_result.stderr.strip()
@@ -7310,6 +7320,10 @@ def cmd_update(args):
         managed_error("update Hermes Agent")
         return
 
+    if getattr(args, "migrate_to_mochi", False):
+        _cmd_migrate_to_mochi(args)
+        return
+
     if getattr(args, "check", False):
         _cmd_update_check()
         return
@@ -7326,6 +7340,27 @@ def cmd_update(args):
         _finalize_update_output(_update_io_state)
 
 
+def _cmd_migrate_to_mochi(args) -> None:
+    """Run the host migration script from the installed checkout."""
+    script_path = PROJECT_ROOT / "scripts" / "migrate_to_mochi.sh"
+    if not script_path.exists():
+        print("✗ Mochi migration script is missing from this checkout.")
+        print(f"  Run: curl -fsSL {MOCHI_MIGRATION_SCRIPT_URL} | bash")
+        sys.exit(1)
+
+    cmd = ["bash", str(script_path)]
+    repo_url = getattr(args, "repo_url", None)
+    if repo_url:
+        cmd.extend(["--repo-url", repo_url])
+    branch = getattr(args, "branch", None)
+    if branch:
+        cmd.extend(["--branch", branch])
+
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
 def _cmd_update_impl(args, gateway_mode: bool):
     """Body of ``cmd_update`` — kept separate so the wrapper can always
     restore stdio even on ``sys.exit``."""
@@ -7340,10 +7375,6 @@ def _cmd_update_impl(args, gateway_mode: bool):
     print("⚕ Updating Hermes Agent...")
     print()
 
-    # Pre-update backup — runs before any git/file mutation so users can
-    # always roll back to the exact state they had before this update.
-    _run_pre_update_backup(args)
-
     # Try git-based update first, fall back to ZIP download on Windows
     # when git file I/O is broken (antivirus, NTFS filter drivers, etc.)
     use_zip_update = False
@@ -7355,7 +7386,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         else:
             print("✗ Not a git repository. Please reinstall:")
             print(
-                "  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash"
+                "  curl -fsSL https://raw.githubusercontent.com/Verbiflow/mochi/main/scripts/install.sh | bash"
             )
             sys.exit(1)
 
@@ -7383,6 +7414,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
     # Detect if we're updating from a fork (before any branch logic)
     origin_url = _get_origin_url(git_cmd, PROJECT_ROOT)
+    _exit_if_legacy_hermes_origin(origin_url, gateway_mode=gateway_mode)
     is_fork = _is_fork(origin_url)
 
     if is_fork:
@@ -7392,8 +7424,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
     if use_zip_update:
         # ZIP-based update for Windows when git is broken
+        _run_pre_update_backup(args)
         _update_via_zip(args)
         return
+
+    # Pre-update backup — runs before any git/file mutation so users can
+    # always roll back to the exact state they had before this update.
+    _run_pre_update_backup(args)
 
     # Fetch and pull
     try:
@@ -7571,9 +7608,14 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 f"  ✓ Cleared {removed} stale __pycache__ director{'y' if removed == 1 else 'ies'}"
             )
 
-        # Fork upstream sync logic (only for main branch on forks)
+        # Fork upstream notice only. Updates pull from origin/main; never pull
+        # from or push to an upstream remote implicitly.
         if is_fork and branch == "main":
-            _sync_with_upstream_if_needed(git_cmd, PROJECT_ROOT)
+            _maybe_offer_mochi_upstream(
+                git_cmd,
+                PROJECT_ROOT,
+                gateway_mode=gateway_mode,
+            )
 
         # Reinstall Python dependencies. Prefer .[all], but if one optional extra
         # breaks on this machine, keep base deps and reinstall the remaining extras
@@ -11370,6 +11412,22 @@ Examples:
         action="store_true",
         default=False,
         help="Check whether an update is available without installing anything",
+    )
+    update_parser.add_argument(
+        "--migrate-to-mochi",
+        action="store_true",
+        default=False,
+        help="Migrate a legacy Hermes git install to the Mochi fork, preserving ~/.hermes state",
+    )
+    update_parser.add_argument(
+        "--repo-url",
+        default=None,
+        help="Repository URL for --migrate-to-mochi (default: https://github.com/Verbiflow/mochi.git)",
+    )
+    update_parser.add_argument(
+        "--branch",
+        default=None,
+        help="Branch for --migrate-to-mochi (default: main)",
     )
     update_parser.add_argument(
         "--no-backup",
