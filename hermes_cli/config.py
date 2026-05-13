@@ -1546,7 +1546,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 23,
+    "_config_version": 24,
 }
 
 # =============================================================================
@@ -1563,6 +1563,52 @@ ENV_VARS_BY_VERSION: Dict[int, List[str]] = {
     10: ["TAVILY_API_KEY"],
     11: ["TERMINAL_MODAL_MODE"],
 }
+
+_GROWTH_MCP_PACKAGE_NAMES = {
+    "growth-mcp",
+    "sales-mcp",
+    "verbiflow-mcp",
+}
+
+
+def _mcp_config_command_parts(server_cfg: Dict[str, Any]) -> List[str]:
+    parts: List[str] = []
+    command = server_cfg.get("command")
+    if command is not None:
+        parts.append(str(command))
+    args = server_cfg.get("args")
+    if isinstance(args, list):
+        parts.extend(str(arg) for arg in args)
+    elif args is not None:
+        parts.append(str(args))
+    return parts
+
+
+def _is_growth_mcp_config_entry(server_name: str, server_cfg: Dict[str, Any]) -> bool:
+    """Return true for legacy Growth MCP entries we can migrate deterministically."""
+    if not isinstance(server_cfg, dict):
+        return False
+    name = server_name.strip().lower()
+    if name in {"growth", *_GROWTH_MCP_PACKAGE_NAMES}:
+        return True
+    for part in _mcp_config_command_parts(server_cfg):
+        lowered = part.lower()
+        for pkg in _GROWTH_MCP_PACKAGE_NAMES:
+            if re.search(rf"(^|[/@:]){re.escape(pkg)}($|[/@:\s])", lowered):
+                return True
+    return False
+
+
+def _configured_gateway_browser_provider(server_cfg: Dict[str, Any]) -> str:
+    existing = str(server_cfg.get("gateway_browser_provider") or "").strip().lower()
+    if existing in {"chrome", "safari"}:
+        return existing
+    env = server_cfg.get("env")
+    if isinstance(env, dict):
+        from_env = str(env.get("GROWTH_MCP_BROWSER_PROVIDER") or "").strip().lower()
+        if from_env in {"chrome", "safari"}:
+            return from_env
+    return "chrome"
 
 # Required environment variables with metadata for migration prompts.
 # LLM provider is required but handled in the setup wizard's provider
@@ -3736,6 +3782,44 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                     print(
                         "  ✓ Seeded auxiliary.curator defaults in config.yaml: "
                         f"{', '.join(added_aux)}"
+                    )
+
+    # ── Version 23 → 24: make Growth MCP gateway scoping explicit ──
+    # Gateway deployments must not share one Growth MCP auth/browser identity
+    # across Slack/WhatsApp/iMessage users. Older configs only had command,
+    # args, timeout, and connect_timeout. Normalize known Growth MCP entries
+    # once during config migration so runtime uses explicit config instead of
+    # guessing by server name/package on every startup.
+    if current_ver < 24:
+        config = read_raw_config()
+        servers = config.get("mcp_servers")
+        touched_servers: List[str] = []
+        if isinstance(servers, dict):
+            for server_name, server_cfg in servers.items():
+                if not isinstance(server_cfg, dict):
+                    continue
+                if not _is_growth_mcp_config_entry(str(server_name), server_cfg):
+                    continue
+                changed = False
+                if "per_auth_scope" not in server_cfg:
+                    server_cfg["per_auth_scope"] = True
+                    changed = True
+                if "gateway_browser_provider" not in server_cfg:
+                    server_cfg["gateway_browser_provider"] = _configured_gateway_browser_provider(server_cfg)
+                    changed = True
+                if changed:
+                    touched_servers.append(str(server_name))
+            if touched_servers:
+                config["mcp_servers"] = servers
+                save_config(config)
+                results["config_added"].append(
+                    "mcp_servers.*.per_auth_scope/gateway_browser_provider "
+                    f"({', '.join(touched_servers)})"
+                )
+                if not quiet:
+                    print(
+                        "  ✓ Enabled scoped gateway auth/browser profiles for "
+                        f"Growth MCP server(s): {', '.join(touched_servers)}"
                     )
 
     if current_ver < latest_ver and not quiet:

@@ -706,6 +706,95 @@ class TestInterimAssistantMessageConfig:
         assert raw["display"]["interim_assistant_messages"] is True
 
 
+class TestGrowthMcpGatewayConfigMigration:
+    def test_migrates_legacy_growth_mcp_entry_to_explicit_gateway_scope(self, tmp_path):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "_config_version": 23,
+                    "mcp_servers": {
+                        "growth": {
+                            "command": "npx",
+                            "args": ["-y", "growth-mcp@latest", "serve"],
+                            "connect_timeout": 60,
+                            "timeout": 180,
+                        },
+                        "filesystem": {
+                            "command": "npx",
+                            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            migrate_config(interactive=False, quiet=True)
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+        growth = raw["mcp_servers"]["growth"]
+        assert raw["_config_version"] == DEFAULT_CONFIG["_config_version"]
+        assert growth["per_auth_scope"] is True
+        assert growth["gateway_browser_provider"] == "chrome"
+        assert "per_auth_scope" not in raw["mcp_servers"]["filesystem"]
+        assert "gateway_browser_provider" not in raw["mcp_servers"]["filesystem"]
+
+    def test_migration_preserves_explicit_growth_gateway_browser_provider(self, tmp_path):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "_config_version": 23,
+                    "mcp_servers": {
+                        "mcp": {
+                            "command": "node",
+                            "args": ["/Users/test/.flage/growth-mcp/dist/index.js", "serve"],
+                            "env": {"GROWTH_MCP_BROWSER_PROVIDER": "safari"},
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            migrate_config(interactive=False, quiet=True)
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+        server = raw["mcp_servers"]["mcp"]
+        assert server["per_auth_scope"] is True
+        assert server["gateway_browser_provider"] == "safari"
+
+    def test_migration_does_not_override_explicit_per_auth_scope_false(self, tmp_path):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "_config_version": 23,
+                    "mcp_servers": {
+                        "growth": {
+                            "command": "npx",
+                            "args": ["-y", "verbiflow-mcp@latest", "serve"],
+                            "per_auth_scope": False,
+                            "gateway_browser_provider": "chrome",
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            migrate_config(interactive=False, quiet=True)
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+        server = raw["mcp_servers"]["growth"]
+        assert server["per_auth_scope"] is False
+        assert server["gateway_browser_provider"] == "chrome"
+
+
 class TestDiscordChannelPromptsConfig:
     def test_default_config_includes_discord_channel_prompts(self):
         assert DEFAULT_CONFIG["discord"]["channel_prompts"] == {}

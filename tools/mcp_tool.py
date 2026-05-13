@@ -2910,6 +2910,10 @@ def _parse_boolish(value: Any, default: bool = True) -> bool:
     return default
 
 
+def _should_use_per_auth_scope(name: str, config: dict) -> bool:
+    return _parse_boolish(config.get("per_auth_scope", False), default=False)
+
+
 _UTILITY_CAPABILITY_METHODS = {
     "list_resources": "list_resources",
     "read_resource": "read_resource",
@@ -3119,7 +3123,7 @@ async def _discover_and_register_server(name: str, config: dict) -> List[str]:
     Returns list of registered tool names.
     """
     connect_timeout = config.get("connect_timeout", _DEFAULT_CONNECT_TIMEOUT)
-    per_auth_scope = _parse_boolish(config.get("per_auth_scope", False), default=False)
+    per_auth_scope = _should_use_per_auth_scope(name, config)
     connect_config = _bootstrap_gateway_config(config) if per_auth_scope else config
     server = await asyncio.wait_for(
         _connect_server(name, connect_config),
