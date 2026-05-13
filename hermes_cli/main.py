@@ -7362,7 +7362,7 @@ def _cmd_migrate_to_mochi(args) -> None:
 
 
 def _run_update_config_migrations(*, gateway_mode: bool, assume_yes: bool, gw_input_fn=None) -> None:
-    """Apply config migrations during update, even when code is already current."""
+    """Apply safe config migrations during update, even when code is current."""
     print()
     print("→ Checking configuration for new options...")
 
@@ -7377,54 +7377,24 @@ def _run_update_config_migrations(*, gateway_mode: bool, assume_yes: bool, gw_in
     missing_config = get_missing_config_fields()
     current_ver, latest_ver = check_config_version()
 
-    needs_migration = missing_env or missing_config or current_ver < latest_ver
-
-    if not needs_migration:
-        print("  ✓ Configuration is up to date")
-        return
-
-    print()
     if missing_env:
-        print(f"  ⚠️  {len(missing_env)} new required setting(s) need configuration")
+        print(f"  ⚠️  {len(missing_env)} required setting(s) still need manual configuration")
     if missing_config:
-        print(f"  ℹ️  {len(missing_config)} new config option(s) available")
+        print(f"  ℹ️  {len(missing_config)} config option(s) will be added")
     if current_ver < latest_ver:
         print(f"  ℹ️  Config version: {current_ver} → {latest_ver}")
 
-    print()
-    if assume_yes:
-        print("  ℹ --yes: auto-applying config migration (skipping API-key prompts).")
-        response = "y"
-    elif gateway_mode:
-        prompt = "Would you like to configure new options now? [Y/n]"
-        response = (
-            (gw_input_fn or _gateway_prompt)(prompt, "n")
-            .strip()
-            .lower()
-        )
-    elif not (sys.stdin.isatty() and sys.stdout.isatty()):
-        print("  ℹ Non-interactive session — applying safe config migrations.")
-        response = "auto"
-    else:
-        try:
-            response = input("Would you like to configure them now? [Y/n]: ").strip().lower()
-        except EOFError:
-            response = "n"
+    results = migrate_config(interactive=False, quiet=False)
 
-    if response in {"", "y", "yes", "auto"}:
+    if results["env_added"] or results["config_added"]:
         print()
-        interactive_migration = not (gateway_mode or assume_yes or response == "auto")
-        results = migrate_config(interactive=interactive_migration, quiet=False)
-
-        if results["env_added"] or results["config_added"]:
-            print()
-            print("✓ Configuration updated!")
-        if (gateway_mode or assume_yes or response == "auto") and missing_env:
-            print("  ℹ API keys require manual entry: hermes config migrate")
+        print("✓ Configuration updated!")
+    elif not (missing_env or missing_config or current_ver < latest_ver):
+        print("  ✓ Configuration is up to date")
         return
 
-    print()
-    print("Skipped. Run 'hermes config migrate' later to configure.")
+    if missing_env:
+        print("  ℹ API keys require manual entry: hermes config migrate")
 
 
 def _cmd_update_impl(args, gateway_mode: bool):

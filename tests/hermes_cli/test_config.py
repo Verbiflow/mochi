@@ -767,6 +767,32 @@ class TestGrowthMcpGatewayConfigMigration:
         assert server["per_auth_scope"] is True
         assert server["gateway_browser_provider"] == "safari"
 
+    def test_migration_repairs_current_version_missing_growth_gateway_fields(self, tmp_path):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "_config_version": DEFAULT_CONFIG["_config_version"],
+                    "mcp_servers": {
+                        "growth": {
+                            "command": "npx",
+                            "args": ["-y", "verbiflow-mcp@latest", "serve"],
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            results = migrate_config(interactive=False, quiet=True)
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+        server = raw["mcp_servers"]["growth"]
+        assert server["per_auth_scope"] is True
+        assert server["gateway_browser_provider"] == "chrome"
+        assert "mcp_servers.*.per_auth_scope/gateway_browser_provider" in results["config_added"][0]
+
     def test_migration_does_not_override_explicit_per_auth_scope_false(self, tmp_path):
         config_path = tmp_path / "config.yaml"
         config_path.write_text(

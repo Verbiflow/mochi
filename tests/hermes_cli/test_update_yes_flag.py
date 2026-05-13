@@ -47,8 +47,8 @@ def _make_run_side_effect(
     return side_effect
 
 
-class TestUpdateYesConfigMigration:
-    """--yes auto-answers the config-migration prompt and skips API-key prompts."""
+class TestUpdateConfigMigration:
+    """Update always applies safe config migrations without prompting for API keys."""
 
     @patch("hermes_cli.config.migrate_config")
     @patch("hermes_cli.config.check_config_version", return_value=(1, 2))
@@ -85,8 +85,7 @@ class TestUpdateYesConfigMigration:
         assert kwargs.get("interactive") is False
 
         out = capsys.readouterr().out
-        assert "--yes: auto-applying config migration" in out
-        # The "Would you like to configure them now?" prompt text never appears.
+        assert "API keys require manual entry" in out
         assert "Would you like to configure them now?" not in out
 
     @patch("hermes_cli.config.migrate_config")
@@ -95,7 +94,7 @@ class TestUpdateYesConfigMigration:
     @patch("hermes_cli.config.get_missing_env_vars", return_value=["NEW_KEY"])
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
-    def test_no_yes_flag_still_prompts_in_tty(
+    def test_no_yes_flag_still_does_not_prompt_for_config_migration(
         self,
         mock_run,
         _mock_which,
@@ -105,7 +104,7 @@ class TestUpdateYesConfigMigration:
         mock_migrate,
         capsys,
     ):
-        """Regression guard: without --yes, the TTY prompt path still fires."""
+        """Safe update-time config migrations run without a Y/n prompt."""
         mock_run.side_effect = _make_run_side_effect(
             branch="main", verify_ok=True, commit_count="1"
         )
@@ -126,12 +125,16 @@ class TestUpdateYesConfigMigration:
             _sys.stdin, "isatty", return_value=True
         ), patch.object(_sys.stdout, "isatty", return_value=True):
             cmd_update(args)
-            # The user was actually prompted.
-            assert mock_input.called
-            prompts = [c.args[0] if c.args else "" for c in mock_input.call_args_list]
-            assert any("configure them now" in p for p in prompts)
+            mock_input.assert_not_called()
+
+        assert mock_migrate.call_count == 1
+        _, kwargs = mock_migrate.call_args
+        assert kwargs.get("interactive") is False
+
+        out = capsys.readouterr().out
+        assert "API keys require manual entry" in out
+        assert "Would you like to configure them now?" not in out
 
 
 class TestUpdateYesStashRestore:
     """--yes auto-restores the pre-update autostash without prompting."""
-

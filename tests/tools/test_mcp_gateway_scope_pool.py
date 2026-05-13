@@ -1,5 +1,6 @@
 from tools.mcp_tool import (
     MCPAuthScopePool,
+    _assert_gateway_growth_mcp_is_explicitly_scoped,
     _bootstrap_gateway_config,
     _should_use_per_auth_scope,
 )
@@ -52,4 +53,30 @@ def test_per_auth_scope_is_explicit():
             "command": "npx",
             "args": ["-y", "growth-mcp@latest"],
         },
+    )
+
+
+def test_gateway_growth_mcp_without_explicit_scope_fails_closed(monkeypatch):
+    monkeypatch.setenv("_HERMES_GATEWAY", "1")
+
+    try:
+        _assert_gateway_growth_mcp_is_explicitly_scoped(
+            "growth",
+            {"command": "npx", "args": ["-y", "growth-mcp@latest", "serve"]},
+        )
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected unscoped Growth MCP gateway config to fail")
+
+    assert "per_auth_scope: true" in message
+    assert "Refusing to start an unscoped Growth MCP process" in message
+
+
+def test_gateway_non_growth_mcp_without_explicit_scope_is_allowed(monkeypatch):
+    monkeypatch.setenv("_HERMES_GATEWAY", "1")
+
+    _assert_gateway_growth_mcp_is_explicitly_scoped(
+        "filesystem",
+        {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem"]},
     )

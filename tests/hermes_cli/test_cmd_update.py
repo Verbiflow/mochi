@@ -99,10 +99,11 @@ class TestCmdUpdateBranchFallback:
         with patch("hermes_cli.config.get_missing_env_vars", return_value=[]), patch(
             "hermes_cli.config.get_missing_config_fields", return_value=[]
         ), patch("hermes_cli.config.check_config_version", return_value=(24, 24)), patch(
-            "hermes_cli.config.migrate_config"
+            "hermes_cli.config.migrate_config",
+            return_value={"env_added": [], "config_added": [], "warnings": []},
         ) as mock_migrate:
             cmd_update(mock_args)
-            mock_migrate.assert_not_called()
+            mock_migrate.assert_called_once_with(interactive=False, quiet=False)
 
         captured = capsys.readouterr()
         assert "Already up to date!" in captured.out
@@ -207,7 +208,7 @@ class TestCmdUpdateBranchFallback:
 
             migrate_config.assert_called_once_with(interactive=False, quiet=False)
             captured = capsys.readouterr()
-            assert "applying safe config migrations" in captured.out
+            assert "required setting(s) still need manual configuration" in captured.out
             assert "API keys require manual entry" in captured.out
 
 

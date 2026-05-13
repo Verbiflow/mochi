@@ -3789,8 +3789,23 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
     # across Slack/WhatsApp/iMessage users. Older configs only had command,
     # args, timeout, and connect_timeout. Normalize known Growth MCP entries
     # once during config migration so runtime uses explicit config instead of
-    # guessing by server name/package on every startup.
-    if current_ver < 24:
+    # guessing by server name/package on every startup. Keep this block
+    # self-healing even after version 24: early update builds could bump the
+    # config version without writing these nested MCP fields.
+    raw_config_for_growth_mcp = read_raw_config()
+    raw_growth_mcp_servers = raw_config_for_growth_mcp.get("mcp_servers")
+    needs_growth_mcp_gateway_migration = current_ver < 24
+    if isinstance(raw_growth_mcp_servers, dict):
+        for server_name, server_cfg in raw_growth_mcp_servers.items():
+            if not isinstance(server_cfg, dict):
+                continue
+            if not _is_growth_mcp_config_entry(str(server_name), server_cfg):
+                continue
+            if "per_auth_scope" not in server_cfg or "gateway_browser_provider" not in server_cfg:
+                needs_growth_mcp_gateway_migration = True
+                break
+
+    if needs_growth_mcp_gateway_migration:
         config = read_raw_config()
         servers = config.get("mcp_servers")
         touched_servers: List[str] = []
