@@ -3200,7 +3200,7 @@ class GatewayRunner:
         
         Returns True if at least one adapter connected successfully.
         """
-        logger.info("Starting Hermes Gateway...")
+        logger.info("Starting Mochi Gateway...")
         try:
             self._gateway_loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -12319,7 +12319,7 @@ class GatewayRunner:
         return await loop.run_in_executor(None, _collect_and_upload)
 
     async def _handle_update_command(self, event: MessageEvent) -> str:
-        """Handle /update command — update Hermes Agent to the latest version.
+        """Handle /update command — update Mochi to the latest version.
 
         Spawns ``hermes update`` in a detached session (via ``setsid``) so it
         survives the gateway restart that ``hermes update`` may trigger. Marker
@@ -12346,7 +12346,7 @@ class GatewayRunner:
                 return t("gateway.update.platform_not_messaging")
 
         if is_managed():
-            return f"✗ {format_managed_message('update Hermes Agent')}"
+            return f"✗ {format_managed_message('update Mochi')}"
 
         project_root = Path(__file__).parent.parent.resolve()
         git_dir = project_root / '.git'
@@ -12584,11 +12584,11 @@ class GatewayRunner:
                     exit_code_raw = exit_code_path.read_text().strip() or "1"
                     exit_code = int(exit_code_raw)
                     if exit_code == 0:
-                        await adapter.send(chat_id, "✅ Hermes update finished.", metadata=metadata)
+                        await adapter.send(chat_id, "✅ Mochi update finished.", metadata=metadata)
                     else:
                         await adapter.send(
                             chat_id,
-                            "❌ Hermes update failed (exit code {}).".format(exit_code),
+                            "❌ Mochi update failed (exit code {}).".format(exit_code),
                             metadata=metadata,
                         )
                     logger.info("Update finished (exit=%s), notified %s", exit_code, session_key)
@@ -12676,7 +12676,7 @@ class GatewayRunner:
             try:
                 await adapter.send(
                     chat_id,
-                    "❌ Hermes update timed out after 30 minutes.",
+                    "❌ Mochi update timed out after 30 minutes.",
                     metadata=metadata,
                 )
             except Exception:
@@ -12749,13 +12749,13 @@ class GatewayRunner:
                     if len(output) > 3500:
                         output = "…" + output[-3500:]
                     if exit_code == 0:
-                        msg = f"✅ Hermes update finished.\n\n```\n{output}\n```"
+                        msg = f"✅ Mochi update finished.\n\n```\n{output}\n```"
                     else:
-                        msg = f"❌ Hermes update failed.\n\n```\n{output}\n```"
+                        msg = f"❌ Mochi update failed.\n\n```\n{output}\n```"
                 elif exit_code == 0:
-                    msg = "✅ Hermes update finished successfully."
+                    msg = "✅ Mochi update finished successfully."
                 else:
-                    msg = "❌ Hermes update failed. Check the gateway logs or run `hermes update` manually for details."
+                    msg = "❌ Mochi update failed. Check the gateway logs or run `hermes update` manually for details."
                 await adapter.send(chat_id, msg, metadata=metadata)
                 logger.info(
                     "Sent post-update notification to %s:%s (exit=%s)",
@@ -12850,7 +12850,7 @@ class GatewayRunner:
         """
         delivered: set[tuple[str, str, Optional[str]]] = set()
         skipped = skip_targets or set()
-        message = "♻️ Gateway online — Hermes is back and ready."
+        message = "♻️ Gateway online — Mochi is back and ready."
 
         for platform, adapter in self.adapters.items():
             home = self.config.get_home_channel(platform)
@@ -12909,7 +12909,9 @@ class GatewayRunner:
         Returns a list of reset tokens; pass them to ``_clear_session_env``
         in a ``finally`` block.
         """
+        from gateway.session import resolve_gateway_auth_scope
         from gateway.session_context import set_session_vars
+        gateway_auth_scope = resolve_gateway_auth_scope(context.source) or ""
         return set_session_vars(
             platform=context.source.platform.value,
             chat_id=context.source.chat_id,
@@ -12917,7 +12919,9 @@ class GatewayRunner:
             thread_id=str(context.source.thread_id) if context.source.thread_id else "",
             user_id=str(context.source.user_id) if context.source.user_id else "",
             user_name=str(context.source.user_name) if context.source.user_name else "",
+            guild_id=str(context.source.guild_id) if context.source.guild_id else "",
             session_key=context.session_key,
+            gateway_auth_scope=gateway_auth_scope,
         )
 
     def _clear_session_env(self, tokens: list) -> None:
@@ -13044,7 +13048,7 @@ class GatewayRunner:
             if self._has_setup_skill():
                 disabled_note += (
                     " You have a skill called hermes-agent-setup that can help "
-                    "users configure Hermes features including voice, tools, and more."
+                    "users configure Mochi features including voice, tools, and more."
                 )
             disabled_note += "]"
             if user_text:
@@ -13079,7 +13083,7 @@ class GatewayRunner:
                         if self._has_setup_skill():
                             _no_stt_note += (
                                 " You have a skill called hermes-agent-setup "
-                                "that can help users configure Hermes features "
+                                "that can help users configure Mochi features "
                                 "including voice, tools, and more."
                             )
                         _no_stt_note += "]"
@@ -16648,7 +16652,7 @@ def main():
 
     import argparse
     
-    parser = argparse.ArgumentParser(description="Hermes Gateway - Multi-platform messaging")
+    parser = argparse.ArgumentParser(description="Mochi Gateway - Multi-platform messaging")
     parser.add_argument("--config", "-c", help="Path to gateway config file")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     

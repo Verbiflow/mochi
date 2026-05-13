@@ -54,6 +54,20 @@ def _hash_chat_id(value: str) -> str:
     return _hash_id(value)
 
 
+def _scope_component(value: str) -> str:
+    """Normalize a platform identifier for gateway auth scope keys."""
+    return value.strip().replace("/", "_").replace("\\", "_")
+
+
+def _gateway_whatsapp_identifier(value: str) -> str:
+    try:
+        canonical = canonical_whatsapp_identifier(value)
+    except ValueError:
+        canonical = ""
+    base = canonical or normalize_whatsapp_identifier(value)
+    return "".join(ch for ch in base if ch.isalnum())
+
+
 from .config import (
     Platform,
     GatewayConfig,
@@ -153,6 +167,35 @@ class SessionSource:
             parent_chat_id=data.get("parent_chat_id"),
             message_id=data.get("message_id"),
         )
+
+
+def resolve_gateway_auth_scope(source: SessionSource) -> Optional[str]:
+    """Return the durable auth/browser scope for gateway-scoped MCP servers.
+
+    This is intentionally not the same as the conversation session key. Slack
+    scopes to workspace so new assistant threads in the same workspace reuse
+    Growth auth/browser login, while WhatsApp/iMessage scope to the sender.
+    """
+    platform = source.platform
+    if platform == Platform.SLACK:
+        team_id = _scope_component(source.guild_id or "")
+        return f"slack:{team_id}" if team_id else None
+
+    if platform == Platform.WHATSAPP:
+        raw = source.user_id_alt or source.user_id or source.chat_id_alt or source.chat_id
+        if isinstance(raw, str) and raw.startswith("whatsapp:"):
+            raw = raw.split(":", 1)[1]
+        ident = _scope_component(_gateway_whatsapp_identifier(str(raw))) if raw else ""
+        return f"whatsapp:{ident}" if ident else None
+
+    if platform == Platform.BLUEBUBBLES:
+        raw = source.user_id or source.user_id_alt or source.chat_id_alt or source.chat_id
+        ident = _scope_component(str(raw or ""))
+        return f"bluebubbles:{ident}" if ident else None
+
+    raw = source.guild_id or source.user_id_alt or source.user_id or source.chat_id_alt or source.chat_id
+    ident = _scope_component(str(raw or ""))
+    return f"{platform.value}:{ident}" if ident else None
     
 
 
