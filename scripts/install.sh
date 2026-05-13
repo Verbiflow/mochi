@@ -6,7 +6,7 @@
 # Uses uv for desktop/server installs and Python's stdlib venv + pip on Termux.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Verbiflow/mochi/main/scripts/install.sh | bash
 #
 # Or with options:
 #   curl -fsSL ... | bash -s -- --no-venv --skip-setup
@@ -43,8 +43,8 @@ NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # Configuration
-REPO_URL_SSH="git@github.com:NousResearch/hermes-agent.git"
-REPO_URL_HTTPS="https://github.com/NousResearch/hermes-agent.git"
+REPO_URL_SSH="${MOCHI_REPO_URL_SSH:-git@github.com:Verbiflow/mochi.git}"
+REPO_URL_HTTPS="${MOCHI_REPO_URL:-https://github.com/Verbiflow/mochi.git}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 # INSTALL_DIR is resolved AFTER arg parsing and OS detection so we can pick an
 # FHS-style layout for root installs.  Track whether the user gave us an
@@ -203,6 +203,20 @@ prompt_yes_no() {
     esac
 }
 
+is_legacy_hermes_remote() {
+    local url="${1:-}"
+    url="${url%/}"
+    url="${url%.git}"
+    case "$url" in
+        "https://github.com/NousResearch/hermes-agent"|"git@github.com:NousResearch/hermes-agent")
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 is_termux() {
     [ -n "${TERMUX_VERSION:-}" ] || [[ "${PREFIX:-}" == *"com.termux/files/usr"* ]]
 }
@@ -314,7 +328,7 @@ detect_os() {
             OS="windows"
             DISTRO="windows"
             log_error "Windows detected. Please use the PowerShell installer:"
-            log_info "  irm https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1 | iex"
+            log_info "  irm https://raw.githubusercontent.com/Verbiflow/mochi/main/scripts/install.ps1 | iex"
             exit 1
             ;;
         *)
@@ -883,6 +897,16 @@ clone_repo() {
         if [ -d "$INSTALL_DIR/.git" ]; then
             log_info "Existing installation found, updating..."
             cd "$INSTALL_DIR"
+
+            local origin_url
+            origin_url="$(git remote get-url origin 2>/dev/null || true)"
+            if is_legacy_hermes_remote "$origin_url"; then
+                log_error "Existing install still points at legacy Hermes:"
+                log_info "  $origin_url"
+                log_info "Migrate it to Mochi first:"
+                log_info "  curl -fsSL https://raw.githubusercontent.com/Verbiflow/mochi/main/scripts/migrate_to_mochi.sh | bash"
+                exit 1
+            fi
 
             local autostash_ref=""
             if [ -n "$(git status --porcelain)" ]; then
