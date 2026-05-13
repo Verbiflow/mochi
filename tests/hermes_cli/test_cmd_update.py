@@ -96,7 +96,13 @@ class TestCmdUpdateBranchFallback:
             branch="main", verify_ok=True, commit_count="0"
         )
 
-        cmd_update(mock_args)
+        with patch("hermes_cli.config.get_missing_env_vars", return_value=[]), patch(
+            "hermes_cli.config.get_missing_config_fields", return_value=[]
+        ), patch("hermes_cli.config.check_config_version", return_value=(24, 24)), patch(
+            "hermes_cli.config.migrate_config"
+        ) as mock_migrate:
+            cmd_update(mock_args)
+            mock_migrate.assert_not_called()
 
         captured = capsys.readouterr()
         assert "Already up to date!" in captured.out
@@ -105,6 +111,33 @@ class TestCmdUpdateBranchFallback:
         commands = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
         pull_cmds = [c for c in commands if "pull" in c]
         assert len(pull_cmds) == 0
+
+    @patch("shutil.which", return_value=None)
+    @patch("subprocess.run")
+    def test_update_already_up_to_date_still_runs_config_migrations(
+        self, mock_run, _mock_which, mock_args, capsys
+    ):
+        mock_run.side_effect = _make_run_side_effect(
+            branch="main", verify_ok=True, commit_count="0"
+        )
+        mock_args.yes = True
+
+        with patch("hermes_cli.config.get_missing_env_vars", return_value=[]), patch(
+            "hermes_cli.config.get_missing_config_fields", return_value=[]
+        ), patch("hermes_cli.config.check_config_version", return_value=(23, 24)), patch(
+            "hermes_cli.config.migrate_config",
+            return_value={
+                "env_added": [],
+                "config_added": ["mcp_servers.growth.per_auth_scope"],
+            },
+        ) as mock_migrate:
+            cmd_update(mock_args)
+            mock_migrate.assert_called_once_with(interactive=False, quiet=False)
+
+        captured = capsys.readouterr()
+        assert "Already up to date!" in captured.out
+        assert "Config version: 23" in captured.out
+        assert "Configuration updated!" in captured.out
 
     @patch("shutil.which")
     @patch("subprocess.run")

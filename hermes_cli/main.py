@@ -7361,6 +7361,72 @@ def _cmd_migrate_to_mochi(args) -> None:
         sys.exit(result.returncode)
 
 
+def _run_update_config_migrations(*, gateway_mode: bool, assume_yes: bool, gw_input_fn=None) -> None:
+    """Apply config migrations during update, even when code is already current."""
+    print()
+    print("→ Checking configuration for new options...")
+
+    from hermes_cli.config import (
+        get_missing_env_vars,
+        get_missing_config_fields,
+        check_config_version,
+        migrate_config,
+    )
+
+    missing_env = get_missing_env_vars(required_only=True)
+    missing_config = get_missing_config_fields()
+    current_ver, latest_ver = check_config_version()
+
+    needs_migration = missing_env or missing_config or current_ver < latest_ver
+
+    if not needs_migration:
+        print("  ✓ Configuration is up to date")
+        return
+
+    print()
+    if missing_env:
+        print(f"  ⚠️  {len(missing_env)} new required setting(s) need configuration")
+    if missing_config:
+        print(f"  ℹ️  {len(missing_config)} new config option(s) available")
+    if current_ver < latest_ver:
+        print(f"  ℹ️  Config version: {current_ver} → {latest_ver}")
+
+    print()
+    if assume_yes:
+        print("  ℹ --yes: auto-applying config migration (skipping API-key prompts).")
+        response = "y"
+    elif gateway_mode:
+        prompt = "Would you like to configure new options now? [Y/n]"
+        response = (
+            (gw_input_fn or _gateway_prompt)(prompt, "n")
+            .strip()
+            .lower()
+        )
+    elif not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("  ℹ Non-interactive session — applying safe config migrations.")
+        response = "auto"
+    else:
+        try:
+            response = input("Would you like to configure them now? [Y/n]: ").strip().lower()
+        except EOFError:
+            response = "n"
+
+    if response in {"", "y", "yes", "auto"}:
+        print()
+        interactive_migration = not (gateway_mode or assume_yes or response == "auto")
+        results = migrate_config(interactive=interactive_migration, quiet=False)
+
+        if results["env_added"] or results["config_added"]:
+            print()
+            print("✓ Configuration updated!")
+        if (gateway_mode or assume_yes or response == "auto") and missing_env:
+            print("  ℹ API keys require manual entry: hermes config migrate")
+        return
+
+    print()
+    print("Skipped. Run 'hermes config migrate' later to configure.")
+
+
 def _cmd_update_impl(args, gateway_mode: bool):
     """Body of ``cmd_update`` — kept separate so the wrapper can always
     restore stdio even on ``sys.exit``."""
@@ -7528,6 +7594,11 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     check=False,
                 )
             print("✓ Already up to date!")
+            _run_update_config_migrations(
+                gateway_mode=gateway_mode,
+                assume_yes=assume_yes,
+                gw_input_fn=gw_input_fn,
+            )
             return
 
         print(f"→ Found {commit_count} new commit(s)")
@@ -7755,81 +7826,11 @@ def _cmd_update_impl(args, gateway_mode: bool):
         except Exception:
             pass  # honcho plugin not installed or not configured
 
-        # Check for config migrations
-        print()
-        print("→ Checking configuration for new options...")
-
-        from hermes_cli.config import (
-            get_missing_env_vars,
-            get_missing_config_fields,
-            check_config_version,
-            migrate_config,
+        _run_update_config_migrations(
+            gateway_mode=gateway_mode,
+            assume_yes=assume_yes,
+            gw_input_fn=gw_input_fn,
         )
-
-        missing_env = get_missing_env_vars(required_only=True)
-        missing_config = get_missing_config_fields()
-        current_ver, latest_ver = check_config_version()
-
-        needs_migration = missing_env or missing_config or current_ver < latest_ver
-
-        if needs_migration:
-            print()
-            if missing_env:
-                print(
-                    f"  ⚠️  {len(missing_env)} new required setting(s) need configuration"
-                )
-            if missing_config:
-                print(f"  ℹ️  {len(missing_config)} new config option(s) available")
-
-            print()
-            if assume_yes:
-                print(
-                    "  ℹ --yes: auto-applying config migration (skipping API-key prompts)."
-                )
-                response = "y"
-            elif gateway_mode:
-                response = (
-                    _gateway_prompt(
-                        "Would you like to configure new options now? [Y/n]", "n"
-                    )
-                    .strip()
-                    .lower()
-                )
-            elif not (sys.stdin.isatty() and sys.stdout.isatty()):
-                print("  ℹ Non-interactive session — applying safe config migrations.")
-                response = "auto"
-            else:
-                try:
-                    response = (
-                        input("Would you like to configure them now? [Y/n]: ")
-                        .strip()
-                        .lower()
-                    )
-                except EOFError:
-                    response = "n"
-
-            if response in {"", "y", "yes", "auto"}:
-                print()
-                # Gateway mode, --yes, and non-interactive update contexts
-                # (dashboard / web server actions) cannot prompt for API keys.
-                # Still run the non-interactive migration pass before restarting
-                # so new default config fields and version bumps are written
-                # before the freshly updated gateway validates config at startup.
-                interactive_migration = not (
-                    gateway_mode or assume_yes or response == "auto"
-                )
-                results = migrate_config(interactive=interactive_migration, quiet=False)
-
-                if results["env_added"] or results["config_added"]:
-                    print()
-                    print("✓ Configuration updated!")
-                if (gateway_mode or assume_yes or response == "auto") and missing_env:
-                    print("  ℹ API keys require manual entry: hermes config migrate")
-            else:
-                print()
-                print("Skipped. Run 'hermes config migrate' later to configure.")
-        else:
-            print("  ✓ Configuration is up to date")
 
         print()
         print("✓ Update complete!")
