@@ -76,6 +76,8 @@ Thread safety:
 
 import asyncio
 import concurrent.futures
+import copy
+import hashlib
 import inspect
 import json
 import logging
@@ -87,6 +89,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -950,6 +953,7 @@ class MCPServerTask:
         "_tools", "_error", "_config",
         "_sampling", "_registered_tool_names", "_auth_type", "_refresh_lock",
         "_rpc_lock", "_pending_refresh_tasks",
+        "_gateway_scoped_worker",
         "initialize_result",
     )
 
@@ -981,6 +985,7 @@ class MCPServerTask:
         # transports for conservative per-server ordering.
         self._rpc_lock = asyncio.Lock()
         self._pending_refresh_tasks: set[asyncio.Task] = set()
+        self._gateway_scoped_worker = False
         # Captures the ``InitializeResult`` returned by
         # ``await session.initialize()`` so downstream code can inspect the
         # server's real advertised capabilities (``.capabilities.resources``,
@@ -1061,6 +1066,12 @@ class MCPServerTask:
         After the initial ``await`` (list_tools), all mutations are synchronous
         — atomic from the event loop's perspective.
         """
+        if self._gateway_scoped_worker:
+            logger.debug(
+                "MCP server '%s': ignoring dynamic tool refresh for scoped gateway worker",
+                self.name,
+            )
+            return
         from tools.registry import registry
 
         async with self._refresh_lock:
@@ -1605,6 +1616,7 @@ class MCPServerTask:
 # ---------------------------------------------------------------------------
 
 _servers: Dict[str, MCPServerTask] = {}
+_server_pools: Dict[str, Any] = {}
 
 # Circuit breaker: consecutive error counts per server.  After
 # _CIRCUIT_BREAKER_THRESHOLD consecutive failures, the handler returns
@@ -2151,6 +2163,84 @@ async def _connect_server(name: str, config: dict) -> MCPServerTask:
     return server
 
 
+def _scope_hash(scope: str) -> str:
+    return hashlib.sha256(scope.encode("utf-8")).hexdigest()[:32]
+
+
+def _gateway_auth_root() -> Path:
+    return Path.home() / ".flage" / "gateway-auth"
+
+
+class MCPAuthScopePool:
+    """Per-auth-scope MCP process pool for gateway deployments."""
+
+    def __init__(self, name: str, config: dict):
+        self.name = name
+        self.config = copy.deepcopy(config)
+        self._servers: dict[str, MCPServerTask] = {}
+        self._lock = asyncio.Lock()
+
+    def _scoped_config(self, scope: str) -> dict:
+        cfg = copy.deepcopy(self.config)
+        env = dict(cfg.get("env") or {})
+        h = _scope_hash(scope)
+        auth_dir = _gateway_auth_root() / h
+        browser_dir = auth_dir / "browser"
+        env.update({
+            "GROWTH_MCP_GATEWAY": "1",
+            "GROWTH_MCP_AUTH_SCOPE": scope,
+            "GROWTH_MCP_AUTH_DIR": str(auth_dir),
+            "GROWTH_MCP_BROWSER_PROFILE_DIR": str(browser_dir),
+            "GROWTH_MCP_BROWSER_PROVIDER": str(
+                cfg.get("gateway_browser_provider")
+                or env.get("GROWTH_MCP_BROWSER_PROVIDER")
+                or os.getenv("GROWTH_MCP_BROWSER_PROVIDER")
+                or "chrome"
+            ),
+        })
+        cfg["env"] = env
+        return cfg
+
+    async def get_server(self, scope: str) -> MCPServerTask:
+        if not scope:
+            raise ValueError(
+                f"MCP server '{self.name}' requires a gateway auth scope, "
+                "but none was set for this session"
+            )
+        h = _scope_hash(scope)
+        async with self._lock:
+            existing = self._servers.get(scope)
+            if existing and existing.session:
+                return existing
+            server = MCPServerTask(f"{self.name}@{h}")
+            server._gateway_scoped_worker = True
+            await server.start(self._scoped_config(scope))
+            self._servers[scope] = server
+            return server
+
+
+def _bootstrap_gateway_config(config: dict) -> dict:
+    cfg = copy.deepcopy(config)
+    env = dict(cfg.get("env") or {})
+    scope = f"bootstrap:{_scope_hash(json.dumps(cfg, sort_keys=True, default=str))}"
+    h = _scope_hash(scope)
+    auth_dir = _gateway_auth_root() / h
+    env.update({
+        "GROWTH_MCP_GATEWAY": "1",
+        "GROWTH_MCP_AUTH_SCOPE": scope,
+        "GROWTH_MCP_AUTH_DIR": str(auth_dir),
+        "GROWTH_MCP_BROWSER_PROFILE_DIR": str(auth_dir / "browser"),
+        "GROWTH_MCP_BROWSER_PROVIDER": str(
+            cfg.get("gateway_browser_provider")
+            or env.get("GROWTH_MCP_BROWSER_PROVIDER")
+            or os.getenv("GROWTH_MCP_BROWSER_PROVIDER")
+            or "chrome"
+        ),
+    })
+    cfg["env"] = env
+    return cfg
+
+
 # ---------------------------------------------------------------------------
 # Handler / check-fn factories
 # ---------------------------------------------------------------------------
@@ -2190,7 +2280,20 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             # Cooldown elapsed → fall through as a half-open probe.
 
         with _lock:
+            pool = _server_pools.get(server_name)
             server = _servers.get(server_name)
+        if pool is not None:
+            try:
+                from gateway.session_context import get_session_env
+                scope = get_session_env("HERMES_GATEWAY_AUTH_SCOPE", "")
+                server = _run_on_mcp_loop(pool.get_server(scope), timeout=30)
+            except InterruptedError:
+                return _interrupted_call_result()
+            except Exception as exc:
+                _bump_server_error(server_name)
+                return json.dumps({
+                    "error": _sanitize_error(_exc_str(exc))
+                }, ensure_ascii=False)
         if not server or not server.session:
             _bump_server_error(server_name)
             return json.dumps({
@@ -3016,12 +3119,16 @@ async def _discover_and_register_server(name: str, config: dict) -> List[str]:
     Returns list of registered tool names.
     """
     connect_timeout = config.get("connect_timeout", _DEFAULT_CONNECT_TIMEOUT)
+    per_auth_scope = _parse_boolish(config.get("per_auth_scope", False), default=False)
+    connect_config = _bootstrap_gateway_config(config) if per_auth_scope else config
     server = await asyncio.wait_for(
-        _connect_server(name, config),
+        _connect_server(name, connect_config),
         timeout=connect_timeout,
     )
     with _lock:
         _servers[name] = server
+        if per_auth_scope:
+            _server_pools[name] = MCPAuthScopePool(name, config)
 
     registered_names = _register_server_tools(name, server, config)
     server._registered_tool_names = list(registered_names)

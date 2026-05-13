@@ -317,6 +317,7 @@ def _reset_cached_sudo_passwords() -> None:
 from tools.approval import (
     check_all_command_guards as _check_all_guards_impl,
 )
+from tools.path_security import gateway_auth_path_error
 
 
 def _check_all_guards(command: str, env_type: str) -> dict:
@@ -1681,6 +1682,22 @@ def terminal_tool(
                 "output": "",
                 "exit_code": -1,
                 "error": f"Invalid command: expected string, got {type(command).__name__}",
+                "status": "error",
+            }, ensure_ascii=False)
+
+        if (
+            gateway_auth_path_error(command)
+            or "~/.flage/gateway-auth" in command
+            or "$HOME/.flage/gateway-auth" in command
+        ):
+            return json.dumps({
+                "output": "",
+                "exit_code": -1,
+                "error": (
+                    "Access denied: terminal commands may not target "
+                    "~/.flage/gateway-auth because it contains scoped gateway "
+                    "auth and browser session state."
+                ),
                 "status": "error",
             }, ensure_ascii=False)
 

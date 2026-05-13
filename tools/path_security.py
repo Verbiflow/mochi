@@ -6,6 +6,7 @@ skills_hub, cronjob_tools, and credential_files.
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -41,3 +42,28 @@ def has_traversal_component(path_str: str) -> bool:
     """
     parts = Path(path_str).parts
     return ".." in parts
+
+
+def is_gateway_auth_path(path: str | Path) -> bool:
+    """True when *path* resolves under ~/.flage/gateway-auth.
+
+    Gateway auth dirs hold per-remote-user browser cookies, MCP auth tokens,
+    and action state. The Mac mini agent can technically read them, so file
+    tools must enforce this boundary explicitly.
+    """
+    try:
+        resolved = Path(os.path.expanduser(str(path))).resolve()
+        root = (Path.home() / ".flage" / "gateway-auth").resolve()
+        resolved.relative_to(root)
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def gateway_auth_path_error(path: str | Path) -> str | None:
+    if is_gateway_auth_path(path):
+        return (
+            f"Access denied: {path} is under ~/.flage/gateway-auth, which "
+            "contains scoped gateway auth and browser session state."
+        )
+    return None

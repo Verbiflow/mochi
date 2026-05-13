@@ -15,6 +15,7 @@ from tools.file_operations import (
     normalize_read_pagination,
     normalize_search_pagination,
 )
+from tools.path_security import gateway_auth_path_error
 from tools import file_state
 from agent.redact import redact_sensitive_text
 
@@ -461,6 +462,8 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
             })
 
         _resolved = _resolve_path_for_task(path, task_id)
+        if err := gateway_auth_path_error(_resolved):
+            return json.dumps({"error": err}, ensure_ascii=False)
 
         # ── Binary file guard ─────────────────────────────────────────
         # Block binary files by extension (no I/O).
@@ -540,6 +543,9 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
                 pass  # stat failed — fall through to full read
 
         # ── Perform the read ──────────────────────────────────────────
+        if err := gateway_auth_path_error(path):
+            return json.dumps({"error": err}, ensure_ascii=False)
+
         file_ops = _get_file_ops(task_id)
         result = file_ops.read_file(path, offset, limit)
         result_dict = result.to_dict()

@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from tools.binary_extensions import BINARY_EXTENSIONS
+from tools.path_security import gateway_auth_path_error
 
 from agent.file_safety import (
     build_write_denied_paths,
@@ -87,7 +88,7 @@ def _get_safe_write_root() -> Optional[str]:
 
 def _is_write_denied(path: str) -> bool:
     """Return True if path is on the write deny list."""
-    return _shared_is_write_denied(path)
+    return bool(gateway_auth_path_error(path)) or _shared_is_write_denied(path)
 
 
 # =============================================================================
@@ -689,6 +690,8 @@ class ShellFileOperations(FileOperations):
         """
         # Expand ~ and other shell paths
         path = self._expand_path(path)
+        if err := gateway_auth_path_error(path):
+            return ReadResult(error=err)
         
         offset, limit = normalize_read_pagination(offset, limit)
         
@@ -826,6 +829,8 @@ class ShellFileOperations(FileOperations):
         Uses cat so the full file is returned regardless of size.
         """
         path = self._expand_path(path)
+        if err := gateway_auth_path_error(path):
+            return ReadResult(error=err)
         stat_cmd = f"wc -c < {self._escape_shell_arg(path)} 2>/dev/null"
         stat_result = self._exec(stat_cmd)
         if stat_result.exit_code != 0:
@@ -904,6 +909,8 @@ class ShellFileOperations(FileOperations):
         """
         # Expand ~ and other shell paths
         path = self._expand_path(path)
+        if err := gateway_auth_path_error(path):
+            return SearchResult(error=err, total_count=0)
 
         # Block writes to sensitive paths
         if _is_write_denied(path):
