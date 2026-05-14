@@ -90,7 +90,15 @@ def _normalize_server_url(raw: str) -> str:
     return value.rstrip("/")
 
 
-
+def _webhook_registration_host(bind_host: str) -> str:
+    host = (bind_host or "").strip()
+    if host in {"", "0.0.0.0", "127.0.0.1", "localhost"}:
+        return "127.0.0.1"
+    if host in {"::", "::1"}:
+        return "[::1]"
+    if ":" in host and not (host.startswith("[") and host.endswith("]")):
+        return f"[{host}]"
+    return host
 
 
 # ---------------------------------------------------------------------------
@@ -222,9 +230,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
     @property
     def _webhook_url(self) -> str:
         """Compute the external webhook URL for BlueBubbles registration."""
-        host = self.webhook_host
-        if host in {"0.0.0.0", "127.0.0.1", "localhost", "::"}:
-            host = "localhost"
+        host = _webhook_registration_host(self.webhook_host)
         return f"http://{host}:{self.webhook_port}{self.webhook_path}"
 
     @property
@@ -934,4 +940,3 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             asyncio.create_task(self.mark_read(session_chat_id))
 
         return web.Response(text="ok")
-
