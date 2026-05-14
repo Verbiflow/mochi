@@ -192,7 +192,7 @@ class TestAppMentionHandler:
         assert "assistant_thread_started" in registered_events
         assert "assistant_thread_context_changed" in registered_events
         # Slack slash commands are registered via a single regex matcher
-        # covering every COMMAND_REGISTRY entry (e.g. /hermes, /btw, /stop,
+        # covering every COMMAND_REGISTRY entry (e.g. /mochi, /btw, /stop,
         # /model, ...) so users get native-slash parity with Discord and
         # Telegram. Verify the regex matches the key expected slashes.
         assert len(registered_commands) == 1, (
@@ -201,10 +201,11 @@ class TestAppMentionHandler:
         slash_matcher = registered_commands[0]
         import re as _re
         assert isinstance(slash_matcher, _re.Pattern)
-        for expected in ("/hermes", "/btw", "/stop", "/model", "/help"):
+        for expected in ("/mochi", "/btw", "/stop", "/model", "/help"):
             assert slash_matcher.match(expected), (
                 f"Slack slash regex does not match {expected}"
             )
+        assert not slash_matcher.match("/hermes")
 
 
 class TestSlackConnectCleanup:
@@ -2241,13 +2242,13 @@ class TestSlashCommands:
 
     # ------------------------------------------------------------------
     # Native slash commands — /btw, /stop, /model, ... dispatched directly
-    # instead of as /hermes subcommands. This is the Discord/Telegram parity
+    # instead of as /mochi subcommands. This is the Discord/Telegram parity
     # fix: the slash name itself becomes the command.
     # ------------------------------------------------------------------
 
     @pytest.mark.asyncio
     async def test_native_btw_slash(self, adapter):
-        """/btw with args must dispatch to /background, not /hermes btw."""
+        """/btw with args must dispatch to /background, not /mochi btw."""
         command = {
             "command": "/btw",
             "text": "fix the failing test",
@@ -2286,15 +2287,9 @@ class TestSlashCommands:
         assert msg.text == "/model anthropic/claude-sonnet-4"
 
     @pytest.mark.asyncio
-    async def test_legacy_hermes_prefix_still_works(self, adapter):
-        """Backward compat: /hermes btw foo must still route to /btw foo.
-
-        Old workspace manifests only declared /hermes as the single slash.
-        After users refresh their manifest they get /btw natively, but the
-        legacy form must keep working during the transition.
-        """
+    async def test_mochi_parent_prefix_routes_subcommands(self, adapter):
         command = {
-            "command": "/hermes",
+            "command": "/mochi",
             "text": "btw run the tests",
             "user_id": "U1",
             "channel_id": "C1",
@@ -2304,10 +2299,10 @@ class TestSlashCommands:
         assert msg.text == "/btw run the tests"
 
     @pytest.mark.asyncio
-    async def test_legacy_hermes_freeform_question(self, adapter):
-        """/hermes <free-form text> must stay as the raw text (non-command)."""
+    async def test_mochi_parent_freeform_question(self, adapter):
+        """/mochi <free-form text> must stay as the raw text (non-command)."""
         command = {
-            "command": "/hermes",
+            "command": "/mochi",
             "text": "what's the weather today?",
             "user_id": "U1",
             "channel_id": "C1",
@@ -2315,7 +2310,6 @@ class TestSlashCommands:
         await adapter._handle_slash_command(command)
         msg = adapter.handle_message.call_args[0][0]
         assert msg.text == "what's the weather today?"
-
 
 # ---------------------------------------------------------------------------
 # TestMessageSplitting
@@ -2997,10 +2991,10 @@ class TestSlashEphemeralAck:
         assert ("C_Q", "U_Q") in adapter._slash_command_contexts
 
     @pytest.mark.asyncio
-    async def test_legacy_hermes_slash_stashes_context(self, adapter):
-        """Legacy /hermes <subcommand> also stashes context."""
+    async def test_mochi_parent_slash_stashes_context(self, adapter):
+        """/mochi <subcommand> stashes context."""
         command = {
-            "command": "/hermes",
+            "command": "/mochi",
             "text": "help",
             "user_id": "U_H",
             "channel_id": "C_H",
@@ -3012,10 +3006,10 @@ class TestSlashEphemeralAck:
         assert ("C_H", "U_H") in adapter._slash_command_contexts
 
     @pytest.mark.asyncio
-    async def test_freeform_hermes_question_does_not_stash_context(self, adapter):
-        """Free-form /hermes <question> must NOT route agent reply ephemeral."""
+    async def test_freeform_mochi_question_does_not_stash_context(self, adapter):
+        """Free-form /mochi <question> must NOT route agent reply ephemeral."""
         command = {
-            "command": "/hermes",
+            "command": "/mochi",
             "text": "what's the weather",
             "user_id": "U_FREE",
             "channel_id": "C_FREE",

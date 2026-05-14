@@ -418,19 +418,23 @@ class TestBlueBubblesAttachmentDownload:
 
 
 class TestBlueBubblesWebhookUrl:
-    """_webhook_url property normalises local hosts to 'localhost'."""
+    """_webhook_url advertises a concrete loopback host, not localhost."""
 
     def test_default_host(self, monkeypatch):
         adapter = _make_adapter(monkeypatch)
-        # Default webhook_host is 0.0.0.0 → normalized to localhost
-        assert "localhost" in adapter._webhook_url
-        assert str(adapter.webhook_port) in adapter._webhook_url
-        assert adapter.webhook_path in adapter._webhook_url
+        assert adapter._webhook_url == (
+            f"http://127.0.0.1:{adapter.webhook_port}{adapter.webhook_path}"
+        )
 
-    @pytest.mark.parametrize("host", ["0.0.0.0", "127.0.0.1", "localhost", "::"])
-    def test_local_hosts_normalized(self, monkeypatch, host):
+    @pytest.mark.parametrize("host", ["0.0.0.0", "127.0.0.1", "localhost"])
+    def test_ipv4_local_hosts_advertise_ipv4_loopback(self, monkeypatch, host):
         adapter = _make_adapter(monkeypatch, webhook_host=host)
-        assert adapter._webhook_url.startswith("http://localhost:")
+        assert adapter._webhook_url.startswith("http://127.0.0.1:")
+
+    @pytest.mark.parametrize("host", ["::", "::1"])
+    def test_ipv6_local_hosts_advertise_ipv6_loopback(self, monkeypatch, host):
+        adapter = _make_adapter(monkeypatch, webhook_host=host)
+        assert adapter._webhook_url.startswith("http://[::1]:")
 
     def test_custom_host_preserved(self, monkeypatch):
         adapter = _make_adapter(monkeypatch, webhook_host="192.168.1.50")
