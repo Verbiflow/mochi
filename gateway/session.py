@@ -68,6 +68,25 @@ def _gateway_whatsapp_identifier(value: str) -> str:
     return "".join(ch for ch in base if ch.isalnum())
 
 
+def _raw_gateway_whatsapp_identifier(value: str) -> str:
+    raw = value.strip()
+    if raw.startswith("whatsapp:"):
+        raw = raw.split(":", 1)[1]
+    return _scope_component(raw)
+
+
+def _is_whatsapp_broadcast_chat(value: str) -> bool:
+    raw = value.strip()
+    if raw.startswith("whatsapp:"):
+        raw = raw.split(":", 1)[1]
+    raw = raw.strip().lower()
+    return (
+        raw == "status@broadcast"
+        or raw.endswith("@broadcast")
+        or raw.endswith("@newsletter")
+    )
+
+
 from .config import (
     Platform,
     GatewayConfig,
@@ -174,7 +193,8 @@ def resolve_gateway_auth_scope(source: SessionSource) -> Optional[str]:
 
     This is intentionally not the same as the conversation session key. Slack
     scopes to workspace so new assistant threads in the same workspace reuse
-    Growth auth/browser login, while WhatsApp/iMessage scope to the sender.
+    Growth auth/browser login, while WhatsApp/iMessage groups scope to the
+    conversation and DMs scope to the sender/private chat.
     """
     platform = source.platform
     if platform == Platform.SLACK:
@@ -182,14 +202,26 @@ def resolve_gateway_auth_scope(source: SessionSource) -> Optional[str]:
         return f"slack:{team_id}" if team_id else None
 
     if platform == Platform.WHATSAPP:
-        raw = source.user_id_alt or source.user_id or source.chat_id_alt or source.chat_id
+        if source.chat_type == "group":
+            raw = source.chat_id_alt or source.chat_id
+        else:
+            raw = source.user_id_alt or source.user_id or source.chat_id_alt or source.chat_id
         if isinstance(raw, str) and raw.startswith("whatsapp:"):
             raw = raw.split(":", 1)[1]
-        ident = _scope_component(_gateway_whatsapp_identifier(str(raw))) if raw else ""
+        if not raw or _is_whatsapp_broadcast_chat(str(raw)):
+            return None
+        ident = (
+            _raw_gateway_whatsapp_identifier(str(raw))
+            if source.chat_type == "group"
+            else _scope_component(_gateway_whatsapp_identifier(str(raw)))
+        )
         return f"whatsapp:{ident}" if ident else None
 
     if platform == Platform.BLUEBUBBLES:
-        raw = source.user_id or source.user_id_alt or source.chat_id_alt or source.chat_id
+        if source.chat_type == "group":
+            raw = source.chat_id_alt or source.chat_id
+        else:
+            raw = source.user_id or source.user_id_alt or source.chat_id_alt or source.chat_id
         ident = _scope_component(str(raw or ""))
         return f"bluebubbles:{ident}" if ident else None
 
