@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
-_DOCS_BASE = "https://hermes-agent.nousresearch.com/docs"
+_DOCS_BASE = "https://github.com/Verbiflow/mochi/tree/main/website/docs"
 
 
 def _model_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -1913,7 +1913,7 @@ def _setup_telegram():
         print_info("⚠️  No allowlist set - anyone who finds your bot can use it!")
 
     print()
-    print_info("📬 Home Channel: where Hermes delivers cron job results,")
+    print_info("📬 Home Channel: where Mochi delivers cron job results,")
     print_info("   cross-platform messages, and notifications.")
     print_info("   For Telegram DMs, this is your user ID (same as above).")
 
@@ -1977,7 +1977,7 @@ def _setup_discord():
         print_info("⚠️  No allowlist set - anyone in servers with your bot can use it!")
 
     print()
-    print_info("📬 Home Channel: where Hermes delivers cron job results,")
+    print_info("📬 Home Channel: where Mochi delivers cron job results,")
     print_info("   cross-platform messages, and notifications.")
     print_info("   To get a channel ID: right-click a channel → Copy Channel ID")
     print_info("   (requires Developer Mode in Discord settings)")
@@ -2026,7 +2026,7 @@ def _setup_slack():
     print_info("   3. Install to Workspace: Settings → Install App")
     print_info("   4. After installing, invite the bot to channels: /invite @YourBot")
     print()
-    print_info("   Full guide: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/slack/")
+    print_info(f"   Full guide: {_DOCS_BASE}/user-guide/messaging/slack.md")
     print()
 
     # Generate and write manifest up-front so the user can paste it into
@@ -2059,7 +2059,7 @@ def _setup_slack():
         print_info("   Set SLACK_ALLOW_ALL_USERS=true or GATEWAY_ALLOW_ALL_USERS=true only if you intentionally want open workspace access.")
 
     print()
-    print_info("📬 Home Channel: where Hermes delivers cron job results,")
+    print_info("📬 Home Channel: where Mochi delivers cron job results,")
     print_info("   cross-platform messages, and notifications.")
     print_info("   To get a channel ID: open the channel in Slack, then right-click")
     print_info("   the channel name → Copy link — the ID starts with C (e.g. C01ABC2DE3F).")
@@ -2190,7 +2190,7 @@ def _setup_matrix():
             print_info("⚠️  No allowlist set - anyone who can message the bot can use it!")
 
         print()
-        print_info("📬 Home Room: where Hermes delivers cron job results and notifications.")
+        print_info("📬 Home Room: where Mochi delivers cron job results and notifications.")
         print_info("   Room IDs look like !abc123:server (shown in Element room settings)")
         print_info("   You can also set this later by typing /set-home in a Matrix room.")
         home_room = prompt("Home room ID (leave empty to set later with /set-home)")
@@ -2233,7 +2233,7 @@ def _setup_mattermost():
         print_info("⚠️  No allowlist set - anyone who can message the bot can use it!")
 
     print()
-    print_info("📬 Home Channel: where Hermes delivers cron job results and notifications.")
+    print_info("📬 Home Channel: where Mochi delivers cron job results and notifications.")
     print_info("   To get a channel ID: click channel name → View Info → copy the ID")
     print_info("   You can also set this later by typing /set-home in a Mattermost channel.")
     home_channel = prompt("Home channel ID (leave empty to set later with /set-home)")
@@ -2327,7 +2327,7 @@ def _setup_webhooks():
     print_warning("   internet. For security, run the gateway in a sandboxed environment")
     print_warning("   (Docker, VM, etc.) to limit blast radius from prompt injection.")
     print()
-    print_info("   Full guide: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks/")
+    print_info(f"   Full guide: {_DOCS_BASE}/user-guide/messaging/webhooks.md")
     print()
 
     port = prompt("Webhook port (default 8644)")
@@ -2354,7 +2354,7 @@ def _setup_webhooks():
     print_info("      http://your-server:8644/webhooks/<route-name>")
     print()
     print_info("   Route configuration guide:")
-    print_info("   https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks/#configuring-routes")
+    print_info(f"   {_DOCS_BASE}/user-guide/messaging/webhooks.md#configuring-routes")
     print()
     print_info("   Open config in your editor:  hermes config edit")
     print_info("   Open config in your editor:  hermes config edit")
