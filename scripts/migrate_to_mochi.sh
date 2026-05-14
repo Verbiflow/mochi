@@ -300,13 +300,41 @@ configure_remotes() {
 
 stash_local_changes() {
     STASH_REF=""
+    STASH_SELECTOR=""
     if [ -n "$(git status --porcelain)" ]; then
         local stash_name
         stash_name="mochi-migration-autostash-$(date -u +%Y%m%d-%H%M%S)"
         log "Local changes detected; stashing them before migration..."
         git stash push --include-untracked -m "$stash_name"
+        STASH_SELECTOR="stash@{0}"
         STASH_REF="$(git rev-parse --verify refs/stash)"
         log "Stash: $STASH_REF"
+    fi
+}
+
+restore_stashed_changes() {
+    if [ -z "${STASH_REF:-}" ]; then
+        return
+    fi
+
+    log "Restoring stashed local changes..."
+    if ! git stash apply "$STASH_REF"; then
+        log ""
+        log "Migration stopped before dependency install or gateway restart."
+        log "Your backup is at: $BACKUP_DIR"
+        log "Your local changes are preserved in git stash: $STASH_REF"
+        log "Restore later with: git stash apply $STASH_REF"
+        git reset --hard HEAD >/dev/null 2>&1 || true
+        die "stashed local changes could not be applied cleanly"
+    fi
+
+    if git stash drop "${STASH_SELECTOR:-$STASH_REF}" >/dev/null 2>&1; then
+        log "Restored local changes and removed migration stash."
+        STASH_REF=""
+        STASH_SELECTOR=""
+    else
+        log "Restored local changes, but could not drop stash: $STASH_REF"
+        log "Check it later with: git stash list"
     fi
 }
 
@@ -333,6 +361,8 @@ checkout_and_fast_forward() {
         fi
         die "local checkout cannot fast-forward to origin/$BRANCH"
     fi
+
+    restore_stashed_changes
 }
 
 install_runtime_dependencies() {
@@ -368,6 +398,10 @@ print_summary() {
     log "Commit: $commit"
     log "Origin: $origin"
     log "Backup: $BACKUP_DIR"
+    if [ -n "${STASH_REF:-}" ]; then
+        log "Local changes stash: $STASH_REF"
+        log "Restore later with: git stash apply $STASH_REF"
+    fi
     log "Next update command: hermes update"
     log ""
     if gateway_command_available; then

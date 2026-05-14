@@ -603,3 +603,16 @@ def test_setup_slack_home_channel_empty_not_saved(monkeypatch):
     setup_mod._setup_slack()
 
     assert "SLACK_HOME_CHANNEL" not in saved
+
+
+def test_setup_slack_manifest_uses_mochi_branding(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(setup_mod, "print_success", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_mod, "print_info", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_mod, "print_warning", lambda *_args, **_kwargs: None)
+
+    setup_mod._write_slack_manifest_and_instruct()
+
+    manifest = json.loads((tmp_path / "slack-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["display_information"]["name"] == "Mochi"
+    assert manifest["display_information"]["description"] == "Your Mochi agent on Slack"

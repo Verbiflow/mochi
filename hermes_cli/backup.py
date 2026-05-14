@@ -341,7 +341,7 @@ def run_import(args) -> None:
 
         if (has_config or has_env) and not args.force:
             print()
-            print("Warning: Target directory already has Hermes configuration.")
+            print("Warning: Target directory already has Mochi configuration.")
             print("Importing will overwrite existing files with backup contents.")
             print()
             try:
@@ -460,7 +460,7 @@ def run_import(args) -> None:
             for pname in gw_profiles:
                 print(f"  hermes -p {pname} gateway install")
 
-        print("Done. Your Hermes configuration has been restored.")
+        print("Done. Your Mochi configuration has been restored.")
 
 
 # ---------------------------------------------------------------------------

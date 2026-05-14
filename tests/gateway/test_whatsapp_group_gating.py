@@ -1,6 +1,8 @@
 import json
 from unittest.mock import AsyncMock
 
+import pytest
+
 from gateway.config import Platform, PlatformConfig, load_gateway_config
 
 
@@ -242,6 +244,27 @@ def test_group_policy_open_allows_all_groups():
     # Open policy — all groups pass the gate (mention still needed)
     assert adapter._should_process_message(_group_message("hello")) is False
     assert adapter._should_process_message(_group_message("/status")) is True
+
+
+@pytest.mark.asyncio
+async def test_group_message_event_auth_scope_tracks_group_not_sender():
+    from gateway.session import resolve_gateway_auth_scope
+
+    adapter = _make_adapter(require_mention=False)
+
+    event = await adapter._build_message_event(
+        _group_message(
+            "hello",
+            senderId="15550100000@s.whatsapp.net",
+            senderName="Alice",
+        )
+    )
+
+    assert event is not None
+    assert event.source.chat_id == "120363001234567890@g.us"
+    assert event.source.chat_type == "group"
+    assert event.source.user_id == "15550100000@s.whatsapp.net"
+    assert resolve_gateway_auth_scope(event.source) == "whatsapp:120363001234567890@g.us"
 
 
 # --- Config bridging tests ---
