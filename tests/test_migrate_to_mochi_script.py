@@ -124,7 +124,7 @@ def test_migration_script_switches_origin_removes_legacy_upstream_and_is_idempot
     assert not (hermes_home / ".skip_upstream_prompt").exists()
 
 
-def test_migration_script_stashes_uncommitted_changes(tmp_path: Path) -> None:
+def test_migration_script_restores_uncommitted_changes(tmp_path: Path) -> None:
     install, mochi_bare = _make_install_and_mochi_remote(tmp_path)
     hermes_home = tmp_path / ".hermes"
     env = _migration_env(tmp_path)
@@ -146,7 +146,8 @@ def test_migration_script_stashes_uncommitted_changes(tmp_path: Path) -> None:
     )
 
     stash_list = _run(["git", "stash", "list"], install).stdout
-    assert "mochi-migration-autostash" in stash_list
+    assert "mochi-migration-autostash" not in stash_list
+    assert (install / "local-notes.txt").read_text(encoding="utf-8") == "keep me\n"
 
 
 def test_migration_script_fails_before_deps_when_history_diverged(tmp_path: Path) -> None:

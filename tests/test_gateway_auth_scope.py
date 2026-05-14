@@ -43,7 +43,59 @@ def test_whatsapp_and_bluebubbles_scope_to_sender():
     ) == "bluebubbles:+15550100001"
 
 
+def test_whatsapp_dm_scope_can_fallback_to_chat_id():
+    assert resolve_gateway_auth_scope(
+        SessionSource(
+            platform=Platform.WHATSAPP,
+            chat_id="15550100000@s.whatsapp.net",
+            chat_type="dm",
+        )
+    ) == "whatsapp:15550100000"
+
+
+def test_whatsapp_group_scope_uses_group_chat_not_sender():
+    assert resolve_gateway_auth_scope(
+        SessionSource(
+            platform=Platform.WHATSAPP,
+            chat_id="120363001234567890@g.us",
+            chat_type="group",
+            user_id="15550100000@s.whatsapp.net",
+        )
+    ) == "whatsapp:120363001234567890@g.us"
+
+
+def test_whatsapp_group_without_sender_still_scopes_to_group_chat():
+    assert resolve_gateway_auth_scope(
+        SessionSource(
+            platform=Platform.WHATSAPP,
+            chat_id="120363001234567890@g.us",
+            chat_type="group",
+        )
+    ) == "whatsapp:120363001234567890@g.us"
+
+
+def test_bluebubbles_group_scope_uses_group_chat_not_sender():
+    assert resolve_gateway_auth_scope(
+        SessionSource(
+            platform=Platform.BLUEBUBBLES,
+            chat_id="chat-guid;+;participant-a;+;participant-b",
+            chat_type="group",
+            user_id="+15550100001",
+        )
+    ) == "bluebubbles:chat-guid;+;participant-a;+;participant-b"
+
+
+def test_whatsapp_broadcast_pseudo_chats_have_no_auth_scope():
+    for chat_id in ("status@broadcast", "1234@broadcast", "120363999999999999@newsletter"):
+        assert resolve_gateway_auth_scope(
+            SessionSource(
+                platform=Platform.WHATSAPP,
+                chat_id=chat_id,
+                chat_type="dm",
+            )
+        ) is None
+
+
 def test_gateway_auth_dir_is_denied_to_file_tools():
     blocked = Path.home() / ".flage" / "gateway-auth" / "abc" / "auth.json"
     assert gateway_auth_path_error(blocked)
-
