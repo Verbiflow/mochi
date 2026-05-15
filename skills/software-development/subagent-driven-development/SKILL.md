@@ -8,7 +8,7 @@ platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [delegation, subagent, implementation, workflow, parallel]
-    related_skills: [writing-plans, requesting-code-review, test-driven-development]
+    related_skills: [writing-plans, test-driven-development, systematic-debugging]
 ---
 
 # Subagent-Driven Development
@@ -269,10 +269,6 @@ Implementer subagents should follow TDD:
 4. Commit
 
 Include TDD instructions in every implementer context.
-
-### With requesting-code-review
-
-The two-stage review process IS the code review. For final integration review, use the requesting-code-review skill's review dimensions.
 
 ### With systematic-debugging
 

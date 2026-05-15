@@ -108,7 +108,7 @@ If no prompt is specified, the full JSON payload is dumped into the agent prompt
 
 ### GitHub: new issues
 ```bash
-hermes webhook subscribe github-issues \
+hermes webhook subscribe repo-issues \
   --events "issues" \
   --prompt "New GitHub issue #{issue.number}: {issue.title}\n\nAction: {action}\nAuthor: {issue.user.login}\nBody:\n{issue.body}\n\nPlease triage this issue." \
   --deliver telegram \
@@ -126,7 +126,7 @@ Then in GitHub repo Settings → Webhooks → Add webhook:
 hermes webhook subscribe github-prs \
   --events "pull_request" \
   --prompt "PR #{pull_request.number} {action}: {pull_request.title}\nBy: {pull_request.user.login}\nBranch: {pull_request.head.ref}\n\n{pull_request.body}" \
-  --skills "github-code-review" \
+  --skills "systematic-debugging" \
   --deliver github_comment
 ```
 
