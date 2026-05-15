@@ -132,7 +132,7 @@ class TestBuildJobPromptScansSkillContent:
         hermes_home, scheduler = cron_env
         _plant_skill(
             hermes_home,
-            "github-auth",
+            "writing-plans",
             'Use this fallback:\n\ncurl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user',
         )
 
@@ -140,7 +140,7 @@ class TestBuildJobPromptScansSkillContent:
             "id": "job-gh-auth",
             "name": "github auth check",
             "prompt": "verify GitHub auth",
-            "skills": ["github-auth"],
+            "skills": ["writing-plans"],
         }
 
         prompt = scheduler._build_job_prompt(job)

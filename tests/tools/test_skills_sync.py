@@ -137,8 +137,8 @@ class TestDiscoverBundledSkills:
 class TestReadSkillName:
     def test_reads_name_from_frontmatter(self, tmp_path):
         skill_md = tmp_path / "SKILL.md"
-        skill_md.write_text("---\nname: audiocraft-audio-generation\n---\n# Skill")
-        assert _read_skill_name(skill_md, "audiocraft") == "audiocraft-audio-generation"
+        skill_md.write_text("---\nname: test-driven-development\n---\n# Skill")
+        assert _read_skill_name(skill_md, "tdd") == "test-driven-development"
 
     def test_falls_back_to_dir_name_without_frontmatter(self, tmp_path):
         skill_md = tmp_path / "SKILL.md"
@@ -152,25 +152,25 @@ class TestReadSkillName:
 
     def test_handles_quoted_name(self, tmp_path):
         skill_md = tmp_path / "SKILL.md"
-        skill_md.write_text('---\nname: "serving-llms-vllm"\n---\n')
-        assert _read_skill_name(skill_md, "vllm") == "serving-llms-vllm"
+        skill_md.write_text('---\nname: "systematic-debugging"\n---\n')
+        assert _read_skill_name(skill_md, "debugging") == "systematic-debugging"
 
     def test_discover_uses_frontmatter_name(self, tmp_path):
-        skill_dir = tmp_path / "category" / "audiocraft"
+        skill_dir = tmp_path / "category" / "debugging"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: audiocraft-audio-generation\n---\n# Skill"
+            "---\nname: systematic-debugging\n---\n# Skill"
         )
         skills = _discover_bundled_skills(tmp_path)
-        assert skills[0][0] == "audiocraft-audio-generation"
+        assert skills[0][0] == "systematic-debugging"
 
 
 class TestComputeRelativeDest:
     def test_preserves_category_structure(self):
         bundled = Path("/repo/skills")
-        skill_dir = Path("/repo/skills/mlops/axolotl")
+        skill_dir = Path("/repo/skills/productivity/notion")
         dest = _compute_relative_dest(skill_dir, bundled)
-        assert str(dest).endswith("mlops/axolotl")
+        assert str(dest).endswith("productivity/notion")
 
     def test_flat_skill(self):
         bundled = Path("/repo/skills")
@@ -487,8 +487,92 @@ class TestSyncSkills:
             result = sync_skills(quiet=True)
         assert result == {
             "copied": [], "updated": [], "skipped": 0,
-            "user_modified": [], "cleaned": [], "total_bundled": 0,
+            "user_modified": [], "cleaned": [], "retired_removed": [],
+            "retired_preserved": [], "total_bundled": 0,
         }
+
+    def test_retired_unmodified_manifest_tracked_skill_is_deleted(self, tmp_path):
+        """Retired bundled skills are removed only when the manifest hash matches."""
+        bundled = self._setup_bundled(tmp_path)
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+
+        retired = skills_dir / "email" / "himalaya"
+        retired.mkdir(parents=True)
+        (retired / "SKILL.md").write_text("---\nname: himalaya\n---\n# Himalaya\n")
+        retired_hash = _dir_hash(retired)
+        manifest_file.write_text(f"himalaya:{retired_hash}\n")
+
+        with self._patches(bundled, skills_dir, manifest_file):
+            result = sync_skills(quiet=True)
+
+        assert result["retired_removed"] == ["himalaya"]
+        assert "himalaya" in result["cleaned"]
+        assert not retired.exists()
+        with patch("tools.skills_sync.MANIFEST_FILE", manifest_file):
+            manifest = _read_manifest()
+        assert "himalaya" not in manifest
+
+    def test_retired_user_modified_manifest_tracked_skill_is_preserved(self, tmp_path):
+        """A retired bundled skill stays on disk when the profile copy diverged."""
+        bundled = self._setup_bundled(tmp_path)
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+
+        retired = skills_dir / "email" / "himalaya"
+        retired.mkdir(parents=True)
+        (retired / "SKILL.md").write_text("---\nname: himalaya\n---\n# Himalaya\n")
+        retired_hash = _dir_hash(retired)
+        manifest_file.write_text(f"himalaya:{retired_hash}\n")
+        (retired / "notes.md").write_text("user customization\n")
+
+        with self._patches(bundled, skills_dir, manifest_file):
+            result = sync_skills(quiet=True)
+
+        assert result["retired_preserved"] == ["himalaya"]
+        assert "himalaya" in result["cleaned"]
+        assert retired.exists()
+        assert (retired / "notes.md").exists()
+        with patch("tools.skills_sync.MANIFEST_FILE", manifest_file):
+            manifest = _read_manifest()
+        assert "himalaya" not in manifest
+
+    def test_retired_manifest_only_missing_skill_is_cleaned(self, tmp_path):
+        """A retired manifest entry with no profile copy is just removed."""
+        bundled = self._setup_bundled(tmp_path)
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+        skills_dir.mkdir(parents=True)
+        manifest_file.write_text("himalaya:abc123\n")
+
+        with self._patches(bundled, skills_dir, manifest_file):
+            result = sync_skills(quiet=True)
+
+        assert "himalaya" in result["cleaned"]
+        assert result["retired_removed"] == []
+        assert result["retired_preserved"] == []
+        with patch("tools.skills_sync.MANIFEST_FILE", manifest_file):
+            manifest = _read_manifest()
+        assert "himalaya" not in manifest
+
+    def test_retired_untracked_local_copy_is_preserved(self, tmp_path):
+        """Untracked local copies are user-owned and must not be deleted."""
+        bundled = self._setup_bundled(tmp_path)
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+
+        retired = skills_dir / "email" / "himalaya"
+        retired.mkdir(parents=True)
+        (retired / "SKILL.md").write_text("---\nname: himalaya\n---\n# Local copy\n")
+        manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        manifest_file.write_text("")
+
+        with self._patches(bundled, skills_dir, manifest_file):
+            result = sync_skills(quiet=True)
+
+        assert result["retired_removed"] == []
+        assert result["retired_preserved"] == []
+        assert retired.exists()
 
     def test_failed_copy_does_not_poison_manifest(self, tmp_path):
         """If copytree fails, the skill must NOT be added to the manifest.

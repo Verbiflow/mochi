@@ -55,7 +55,7 @@ def populated_db(db):
         "s1",
         role="assistant",
         content="Let me load the PR workflow skill.",
-        tool_calls=[{"function": {"name": "skill_view", "arguments": '{"name":"github-pr-workflow"}'}}],
+        tool_calls=[{"function": {"name": "skill_view", "arguments": '{"name":"writing-plans"}'}}],
     )
     db.append_message("s1", role="user", content="Thanks!")
     db.append_message("s1", role="assistant", content="You're welcome!")
@@ -97,8 +97,8 @@ def populated_db(db):
     db.append_message(
         "s3",
         role="assistant",
-        content="Load the debugging skill.",
-        tool_calls=[{"function": {"name": "skill_view", "arguments": '{"name":"systematic-debugging"}'}}],
+        content="Load the TDD skill.",
+        tool_calls=[{"function": {"name": "skill_view", "arguments": '{"name":"test-driven-development"}'}}],
     )
 
     # Session 4: Discord, same model as s1, ended, 1 day ago
@@ -117,8 +117,8 @@ def populated_db(db):
         role="assistant",
         content="Load and update GitHub skills.",
         tool_calls=[
-            {"function": {"name": "skill_view", "arguments": '{"name":"github-pr-workflow"}'}},
-            {"function": {"name": "skill_manage", "arguments": '{"name":"github-code-review"}'}},
+            {"function": {"name": "skill_view", "arguments": '{"name":"writing-plans"}'}},
+            {"function": {"name": "skill_manage", "arguments": '{"name":"systematic-debugging"}'}},
         ],
     )
 
@@ -364,7 +364,7 @@ class TestInsightsPopulated:
         assert skills["summary"]["total_skill_actions"] == 4
 
         top_skill = skills["top_skills"][0]
-        assert top_skill["skill"] == "github-pr-workflow"
+        assert top_skill["skill"] == "writing-plans"
         assert top_skill["view_count"] == 2
         assert top_skill["manage_count"] == 0
         assert top_skill["total_count"] == 2
@@ -380,7 +380,7 @@ class TestInsightsPopulated:
         assert skills["summary"]["total_skill_edits"] == 1
 
         skill_names = [s["skill"] for s in skills["top_skills"]]
-        assert "systematic-debugging" not in skill_names
+        assert "test-driven-development" not in skill_names
 
     def test_activity_patterns(self, populated_db):
         engine = InsightsEngine(populated_db)

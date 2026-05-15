@@ -103,7 +103,7 @@ def test_already_wrapped_source_double_wraps_harmlessly(gen_module):
 def test_box_drawing_detection_covers_common_chars(gen_module):
     """Smoke-test that the char set covers box-drawing ranges actually used
     in skill diagrams."""
-    # Sample from real SKILL.md diagrams (segment-anything, research-paper-writing, etc.)
+    # Sample from real SKILL.md diagrams in bundled and optional skills.
     for ch in "┌┐└┘─│├┤┬┴┼═║╔╗╚╝╭╮╯╰▶◀▲▼":
         assert ch in gen_module._BOX_DRAWING_CHARS, f"missing: {ch!r}"
 
@@ -114,3 +114,48 @@ def test_bundled_catalog_explains_missing_local_skills(gen_module):
     result = gen_module.build_catalog_md_bundled([])
     assert "respects local deletions and user edits" in result
     assert "hermes skills reset <name> --restore" in result
+
+
+def test_prune_stale_generated_pages_removes_removed_sources(gen_module, tmp_path, monkeypatch):
+    """Generated pages disappear when their source SKILL.md is deleted or moved."""
+    pages = tmp_path / "docs" / "user-guide" / "skills"
+    stale = pages / "bundled" / "email" / "email-himalaya.md"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("# stale\n")
+
+    meta = {
+        "source_kind": "optional",
+        "category": "note-taking",
+        "sub": None,
+        "slug": "obsidian",
+        "rel_path": "note-taking/obsidian",
+    }
+    keep = pages / "optional" / "note-taking" / "note-taking-obsidian.md"
+    keep.parent.mkdir(parents=True)
+    keep.write_text("# keep\n")
+
+    monkeypatch.setattr(gen_module, "SKILLS_PAGES", pages)
+    monkeypatch.setattr(
+        gen_module,
+        "SKILL_SOURCES",
+        [("bundled", tmp_path / "skills"), ("optional", tmp_path / "optional-skills")],
+    )
+
+    removed = gen_module.prune_stale_generated_pages([(meta, {"frontmatter": {}})])
+
+    assert removed == 1
+    assert not stale.exists()
+    assert keep.exists()
+
+
+def test_obsidian_optional_page_path(gen_module):
+    meta = {
+        "source_kind": "optional",
+        "category": "note-taking",
+        "sub": None,
+        "slug": "obsidian",
+        "rel_path": "note-taking/obsidian",
+    }
+    assert str(gen_module.page_output_path(meta)).endswith(
+        "user-guide/skills/optional/note-taking/note-taking-obsidian.md"
+    )

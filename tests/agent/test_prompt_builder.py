@@ -1042,29 +1042,29 @@ class TestBuildSkillsSystemPromptConditional:
 
     def test_requires_skill_hidden_when_toolset_missing(self, monkeypatch, tmp_path):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-        skill_dir = tmp_path / "skills" / "iot" / "openhue"
+        skill_dir = tmp_path / "skills" / "devops" / "local-terminal-helper"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: openhue\ndescription: Hue lights\nmetadata:\n  hermes:\n    requires_toolsets: [terminal]\n---\n"
+            "---\nname: local-terminal-helper\ndescription: Terminal helper\nmetadata:\n  hermes:\n    requires_toolsets: [terminal]\n---\n"
         )
         result = build_skills_system_prompt(
             available_tools=set(),
             available_toolsets=set(),
         )
-        assert "openhue" not in result
+        assert "local-terminal-helper" not in result
 
     def test_requires_skill_shown_when_toolset_available(self, monkeypatch, tmp_path):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-        skill_dir = tmp_path / "skills" / "iot" / "openhue"
+        skill_dir = tmp_path / "skills" / "devops" / "local-terminal-helper"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: openhue\ndescription: Hue lights\nmetadata:\n  hermes:\n    requires_toolsets: [terminal]\n---\n"
+            "---\nname: local-terminal-helper\ndescription: Terminal helper\nmetadata:\n  hermes:\n    requires_toolsets: [terminal]\n---\n"
         )
         result = build_skills_system_prompt(
             available_tools=set(),
             available_toolsets={"terminal"},
         )
-        assert "openhue" in result
+        assert "local-terminal-helper" in result
 
     def test_unconditional_skill_always_shown(self, monkeypatch, tmp_path):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -1187,5 +1187,4 @@ class TestOpenAIModelExecutionGuidance:
 # =========================================================================
 # Budget warning history stripping
 # =========================================================================
-
 

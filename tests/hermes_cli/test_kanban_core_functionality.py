@@ -2692,11 +2692,11 @@ def test_create_task_persists_skills(kanban_home):
             conn,
             title="skilled task",
             assignee="linguist",
-            skills=["translation", "github-code-review"],
+            skills=["translation", "systematic-debugging"],
         )
         task = kb.get_task(conn, tid)
         assert task is not None
-        assert task.skills == ["translation", "github-code-review"]
+        assert task.skills == ["translation", "systematic-debugging"]
     finally:
         conn.close()
 
@@ -2807,7 +2807,7 @@ def test_default_spawn_appends_per_task_skills(kanban_home, monkeypatch):
             conn,
             title="multi-skill worker",
             assignee="linguist",
-            skills=["translation", "github-code-review"],
+            skills=["translation", "systematic-debugging"],
         )
         task = kb.get_task(conn, tid)
         workspace = kb.resolve_workspace(task)
@@ -2824,7 +2824,7 @@ def test_default_spawn_appends_per_task_skills(kanban_home, monkeypatch):
     # kanban-worker first (built-in), then per-task extras in order.
     assert skill_names[0] == "kanban-worker", skill_names
     assert "translation" in skill_names
-    assert "github-code-review" in skill_names
+    assert "systematic-debugging" in skill_names
     # --skills must appear BEFORE the `chat` subcommand so argparse
     # attaches them to the top-level parser, not the subcommand.
     chat_idx = cmd.index("chat")
@@ -2875,12 +2875,12 @@ def test_cli_create_skill_flag_repeatable(kanban_home):
     """`hermes kanban create --skill a --skill b` persists the list."""
     out = run_slash(
         "create 'multi-skill' --assignee linguist "
-        "--skill translation --skill github-code-review --json"
+        "--skill translation --skill systematic-debugging --json"
     )
     tid = json.loads(out)["id"]
     with kb.connect() as conn:
         task = kb.get_task(conn, tid)
-    assert task.skills == ["translation", "github-code-review"]
+    assert task.skills == ["translation", "systematic-debugging"]
 
 
 def test_cli_create_without_skill_flag_leaves_none(kanban_home):

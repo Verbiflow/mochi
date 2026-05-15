@@ -44,7 +44,7 @@ class TestScanCronPrompt:
         ) == ""
 
     def test_authorization_header_quoted_url_allowed(self):
-        # github-pr-workflow skill wraps the URL in quotes — the allowlist
+        # Some skill examples wrap the URL in quotes — the allowlist
         # must accept the quoted form too, otherwise built-in skills get
         # blocked at every cron tick.
         assert _scan_cron_prompt(

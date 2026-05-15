@@ -428,28 +428,28 @@ class TestBuildPreloadedSkillsPrompt:
 
 class TestBuildSkillInvocationMessage:
     def test_loads_skill_by_stored_path_when_frontmatter_name_differs(self, tmp_path):
-        skill_dir = tmp_path / "mlops" / "audiocraft"
+        skill_dir = tmp_path / "software-development" / "tdd"
         skill_dir.mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(
             """\
 ---
-name: audiocraft-audio-generation
-description: Generate audio with AudioCraft.
+name: test-driven-development
+description: Follow red-green-refactor TDD.
 ---
 
-# AudioCraft
+# Test-Driven Development
 
-Generate some audio.
+Write the failing test first.
 """
         )
 
         with patch("tools.skills_tool.SKILLS_DIR", tmp_path):
             scan_skill_commands()
-            msg = build_skill_invocation_message("/audiocraft-audio-generation", "compose")
+            msg = build_skill_invocation_message("/test-driven-development", "add coverage")
 
         assert msg is not None
-        assert "AudioCraft" in msg
-        assert "compose" in msg
+        assert "Test-Driven Development" in msg
+        assert "add coverage" in msg
 
     def test_builds_message(self, tmp_path):
         with patch("tools.skills_tool.SKILLS_DIR", tmp_path):
