@@ -254,7 +254,9 @@ def sync_skills(quiet: bool = False) -> dict:
 
     Returns:
         dict with keys: copied (list), updated (list), skipped (int),
-                        user_modified (list), cleaned (list), total_bundled (int)
+                        user_modified (list), cleaned (list),
+                        retired_removed (list), retired_preserved (list),
+                        total_bundled (int)
     """
     bundled_dir = _get_bundled_dir()
     if not bundled_dir.exists():

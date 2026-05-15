@@ -8,7 +8,7 @@ platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [atropos, rl, environments, training, reinforcement-learning, reward-functions]
-    related_skills: [axolotl, fine-tuning-with-trl, lm-evaluation-harness]
+    related_skills: [axolotl, fine-tuning-with-trl]
 ---
 
 # Hermes Agent Atropos Environments
