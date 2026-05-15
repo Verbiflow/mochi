@@ -356,7 +356,7 @@ The dispatcher also auto-passes `--skills kanban-worker` when spawning every wor
 
 ### Pinning extra skills to a specific task
 
-Sometimes a single task needs specialist context the assignee profile doesn't carry by default — a translation job that needs the `translation` skill, a review task that needs `github-code-review`, a security audit that needs `security-pr-audit`. Rather than editing the assignee's profile every time, attach the skills directly to the task.
+Sometimes a single task needs specialist context the assignee profile doesn't carry by default — a translation job that needs the `translation` skill, a debugging task that needs `systematic-debugging`, a security audit that needs `security-pr-audit`. Rather than editing the assignee's profile every time, attach the skills directly to the task.
 
 **From an orchestrator agent** (the usual case — one agent routing work to another), use the `kanban_create` tool's `skills` array:
 
@@ -370,7 +370,7 @@ kanban_create(
 kanban_create(
     title="audit auth flow",
     assignee="reviewer",
-    skills=["security-pr-audit", "github-code-review"],
+    skills=["security-pr-audit", "systematic-debugging"],
 )
 ```
 
@@ -384,7 +384,7 @@ hermes kanban create "translate README to Japanese" \
 hermes kanban create "audit auth flow" \
     --assignee reviewer \
     --skill security-pr-audit \
-    --skill github-code-review
+    --skill systematic-debugging
 ```
 
 **From the dashboard**, type the skills comma-separated into the **skills** field of the inline create form.

@@ -104,7 +104,7 @@ Type `/` in the CLI to open the autocomplete menu. Built-in commands are case-in
 
 | Command | Description |
 |---------|-------------|
-| `/<skill-name>` | Load any installed skill as an on-demand command. Example: `/gif-search`, `/github-pr-workflow`, `/excalidraw`. |
+| `/<skill-name>` | Load any installed skill as an on-demand command. Example: `/gif-search`, `/writing-plans`, `/excalidraw`. |
 | `/skills ...` | Search, browse, inspect, install, audit, publish, and configure skills from registries and the official optional-skills catalog. |
 
 ### Quick Commands

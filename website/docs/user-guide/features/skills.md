@@ -25,7 +25,7 @@ Every installed skill is automatically available as a slash command:
 # In the CLI or any messaging platform:
 /gif-search funny cats
 /axolotl help me fine-tune Llama 3 on my dataset
-/github-pr-workflow create a PR for the auth refactor
+/writing-plans create an implementation plan for the auth refactor
 /plan design a rollout for migrating our auth provider
 
 # Just the skill name loads it and lets the agent ask what you need:

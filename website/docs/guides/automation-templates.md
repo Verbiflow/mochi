@@ -74,7 +74,7 @@ Review for:
 - Missing tests for new behavior
 
 Post a concise review. If the PR is a trivial docs/typo change, say so briefly." \
-  --skill github-code-review \
+  --skill systematic-debugging \
   --deliver github_comment
 ```
 
@@ -97,7 +97,7 @@ platforms:
             Author: {pull_request.user.login}
             Diff URL: {pull_request.diff_url}
             Review for security, performance, and code quality.
-          skills: ["github-code-review"]
+          skills: ["systematic-debugging"]
           deliver: "github_comment"
           deliver_extra:
             repo: "{repository.full_name}"
@@ -274,6 +274,12 @@ Monitor competitor repos for interesting PRs, features, and architectural decisi
 
 **Trigger:** Schedule (daily)
 
+Requires optional Obsidian:
+
+```bash
+hermes skills install official/note-taking/obsidian
+```
+
 ```bash
 hermes cron create "0 8 * * *" \
   "Scout these AI agent repositories for notable activity in the last 24 hours:
@@ -351,7 +357,7 @@ Automatically label and respond to new issues.
 **Trigger:** GitHub webhook
 
 ```bash
-hermes webhook subscribe github-issues \
+hermes webhook subscribe repo-issues \
   --events "issues" \
   --prompt "New GitHub issue received:
 Repository: {repository.full_name}
@@ -430,7 +436,7 @@ If action is 'closed' and pull_request.merged is true:
 5. Reference the original PR in the new PR description
 
 If action is not 'closed' or not merged, respond with [SILENT]." \
-  --skill github-pr-workflow \
+  --skill writing-plans \
   --deliver log
 ```
 

@@ -181,8 +181,14 @@ The script does the mechanical collection; the agent adds the reasoning layer.
 
 Chain skills together for complex scheduled tasks. Skills are loaded in order before the prompt executes.
 
+Install optional Obsidian first if you want this notes workflow:
+
 ```bash
-# Use the arxiv skill to find papers, then the obsidian skill to save notes
+hermes skills install official/note-taking/obsidian
+```
+
+```bash
+# Use the arxiv skill to find papers, then optional obsidian to save notes
 /cron add "0 8 * * *" "Search arXiv for the 3 most interesting papers on 'language model reasoning' from the past day. For each paper, create an Obsidian note with the title, authors, abstract summary, and key contribution." \
   --skill arxiv \
   --skill obsidian \
