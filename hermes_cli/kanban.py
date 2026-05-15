@@ -284,7 +284,7 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
                           help="Skill to force-load into the worker "
                                "(repeatable). Appended to the built-in "
                                "kanban-worker skill. Example: "
-                               "--skill translation --skill github-code-review")
+                               "--skill translation --skill systematic-debugging")
     p_create.add_argument("--max-retries", type=int, default=None,
                           metavar="N",
                           help="Per-task override for the consecutive-failure "

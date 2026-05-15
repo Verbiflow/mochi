@@ -67,7 +67,7 @@ TIPS = [
     "hermes -w creates an isolated git worktree — perfect for parallel agent workflows.",
     "hermes -w -q \"Fix issue #42\" combines worktree isolation with a one-shot query.",
     "hermes chat -t web,terminal enables only specific toolsets for a focused session.",
-    "hermes chat -s github-pr-workflow preloads a skill at launch.",
+    "hermes chat -s writing-plans preloads a skill at launch.",
     "hermes chat -q \"query\" runs a single non-interactive query and exits.",
     "hermes chat --max-turns 200 overrides the default 90-iteration limit per turn.",
     "hermes chat --checkpoints enables filesystem snapshots before every destructive file change.",
@@ -169,7 +169,7 @@ TIPS = [
     "Corrections you give the agent (\"no, do it this way\") are often auto-saved to memory.",
 
     # --- Skills ---
-    "Over 80 bundled skills covering github, creative, mlops, productivity, research, and more.",
+    "Over 60 bundled skills covering creative, productivity, research, software development, and more.",
     "Every installed skill automatically becomes a slash command — type / to see them all.",
     "hermes skills install official/security/1password installs optional skills from the repo.",
     "Skills can restrict to specific OS platforms — some only load on macOS or Linux.",
@@ -483,4 +483,3 @@ def get_random_tip(exclude_recent: int = 0) -> str:
             deduplication across sessions.
     """
     return random.choice(TIPS)
-
