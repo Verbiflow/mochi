@@ -23,7 +23,7 @@ Give the agent its own dedicated email inbox via AgentMail. Send, receive, and m
 ## Reference: full SKILL.md
 
 :::info
-The following is the complete skill definition that Hermes loads when this skill is triggered. This is what the agent sees as instructions when the skill is active.
+The following is the complete skill definition that Mochi loads when this skill is triggered. This is what the agent sees as instructions when the skill is active.
 :::
 
 # AgentMail — Agent-Owned Email Inboxes
@@ -42,7 +42,7 @@ Use this skill when you need to:
 - Sign up for services or authenticate via email
 - Communicate with other agents or humans via email
 
-This is NOT for reading the user's personal email (use himalaya or Gmail for that).
+This is NOT for reading the user's personal email (use Gmail or an installed email skill for that).
 AgentMail gives the agent its own identity and inbox.
 
 ## Setup

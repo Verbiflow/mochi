@@ -21,7 +21,7 @@ The setup is fully agent-driven — ask Hermes to set up Google Workspace and it
 4. **Done** — token auto-refreshes from that point on
 
 :::tip Email-only users
-If you only need email (no Calendar/Drive/Sheets), use the **himalaya** skill instead — it works with a Gmail App Password and takes 2 minutes. No Google Cloud project needed.
+If you only need email (no Calendar/Drive/Sheets), use an app-password based mail setup or an installed optional email skill. No Google Cloud project is needed for basic IMAP/SMTP email.
 :::
 
 ## Gmail

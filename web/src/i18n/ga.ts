@@ -685,7 +685,7 @@ export const ga: Translations = {
     assigneePlaceholder: "sannaí",
     priority: "Tosaíocht",
     skillsPlaceholder:
-      "scileanna (roghnach, scartha le camóga): translation, github-code-review",
+      "scileanna (roghnach, scartha le camóga): translation, systematic-debugging",
     noParent: "— gan tuismitheoir —",
     workspacePathDir: "conair workspace (riachtanach, m.sh. ~/projects/my-app)",
     workspacePathOptional:

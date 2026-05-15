@@ -21,12 +21,12 @@ Index a codebase with GitNexus and serve an interactive knowledge graph via web 
 | License | MIT |
 | Platforms | linux, macos, windows |
 | Tags | `gitnexus`, `code-intelligence`, `knowledge-graph`, `visualization` |
-| Related skills | [`native-mcp`](/docs/user-guide/skills/bundled/mcp/mcp-native-mcp), [`codebase-inspection`](/docs/user-guide/skills/bundled/github/github-codebase-inspection) |
+| Related skills | [`native-mcp`](/docs/user-guide/skills/bundled/mcp/mcp-native-mcp) |
 
 ## Reference: full SKILL.md
 
 :::info
-The following is the complete skill definition that Hermes loads when this skill is triggered. This is what the agent sees as instructions when the skill is active.
+The following is the complete skill definition that Mochi loads when this skill is triggered. This is what the agent sees as instructions when the skill is active.
 :::
 
 # GitNexus Explorer

@@ -25,7 +25,7 @@ Set up and use 1Password CLI (op). Use when installing the CLI, enabling desktop
 ## Reference: full SKILL.md
 
 :::info
-The following is the complete skill definition that Hermes loads when this skill is triggered. This is what the agent sees as instructions when the skill is active.
+The following is the complete skill definition that Mochi loads when this skill is triggered. This is what the agent sees as instructions when the skill is active.
 :::
 
 # 1Password CLI

@@ -44,7 +44,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   "mlops/training": "MLOps / Training",
   "mlops/vector-databases": "MLOps / Vector DBs",
   mcp: "MCP",
-  "red-teaming": "Red Teaming",
   ocr: "OCR",
   p5js: "p5.js",
   ai: "AI",

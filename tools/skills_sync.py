@@ -38,6 +38,34 @@ SKILLS_DIR = HERMES_HOME / "skills"
 MANIFEST_FILE = SKILLS_DIR / ".bundled_manifest"
 
 
+RETIRED_BUNDLED_SKILLS: dict[str, str] = {
+    "opencode": "autonomous-ai-agents/opencode",
+    "himalaya": "email/himalaya",
+    "minecraft-modpack-server": "gaming/minecraft-modpack-server",
+    "pokemon-player": "gaming/pokemon-player",
+    "codebase-inspection": "github/codebase-inspection",
+    "github-auth": "github/github-auth",
+    "github-code-review": "github/github-code-review",
+    "github-issues": "github/github-issues",
+    "github-pr-workflow": "github/github-pr-workflow",
+    "github-repo-management": "github/github-repo-management",
+    "audiocraft-audio-generation": "mlops/models/audiocraft",
+    "dspy": "mlops/research/dspy",
+    "huggingface-hub": "mlops/huggingface-hub",
+    "llama-cpp": "mlops/inference/llama-cpp",
+    "evaluating-llms-harness": "mlops/evaluation/lm-evaluation-harness",
+    "obliteratus": "mlops/inference/obliteratus",
+    "segment-anything-model": "mlops/models/segment-anything",
+    "serving-llms-vllm": "mlops/inference/vllm",
+    "weights-and-biases": "mlops/evaluation/weights-and-biases",
+    "obsidian": "note-taking/obsidian",
+    "godmode": "red-teaming/godmode",
+    "research-paper-writing": "research/research-paper-writing",
+    "openhue": "smart-home/openhue",
+    "requesting-code-review": "software-development/requesting-code-review",
+}
+
+
 def _get_bundled_dir() -> Path:
     """Locate the bundled skills/ directory.
 
@@ -154,7 +182,7 @@ def _discover_bundled_skills(bundled_dir: Path) -> List[Tuple[str, Path]]:
 def _compute_relative_dest(skill_dir: Path, bundled_dir: Path) -> Path:
     """
     Compute the destination path in SKILLS_DIR preserving the category structure.
-    e.g., bundled/skills/mlops/axolotl -> ~/.hermes/skills/mlops/axolotl
+    e.g., bundled/skills/productivity/notion -> ~/.hermes/skills/productivity/notion
     """
     rel = skill_dir.relative_to(bundled_dir)
     return SKILLS_DIR / rel
@@ -174,6 +202,52 @@ def _dir_hash(directory: Path) -> str:
     return hasher.hexdigest()
 
 
+def _prune_empty_parents(path: Path) -> None:
+    current = path
+    while current != SKILLS_DIR and SKILLS_DIR in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
+
+
+def _cleanup_retired_bundled_skills(manifest: Dict[str, str]) -> tuple[list[str], list[str]]:
+    """Delete retired bundled profile copies only when manifest proves no edits.
+
+    A non-empty v2 manifest hash proves which bundled bytes were installed.
+    If the current user copy still hashes to that exact value, the copy is
+    unmodified and can be retired. Empty v1 hashes, missing manifest entries,
+    or hash mismatches are preserved as user-owned local skills.
+    """
+    removed: list[str] = []
+    preserved: list[str] = []
+
+    for skill_name, relative_path in sorted(RETIRED_BUNDLED_SKILLS.items()):
+        origin_hash = manifest.get(skill_name)
+        if origin_hash is None:
+            continue
+
+        dest = SKILLS_DIR / relative_path
+        if not dest.exists():
+            continue
+        if not dest.is_dir() or not origin_hash:
+            preserved.append(skill_name)
+            continue
+
+        if _dir_hash(dest) == origin_hash:
+            try:
+                shutil.rmtree(dest)
+                _prune_empty_parents(dest.parent)
+                removed.append(skill_name)
+            except (OSError, IOError):
+                preserved.append(skill_name)
+        else:
+            preserved.append(skill_name)
+
+    return removed, preserved
+
+
 def sync_skills(quiet: bool = False) -> dict:
     """
     Sync bundled skills into ~/.hermes/skills/ using the manifest.
@@ -186,7 +260,8 @@ def sync_skills(quiet: bool = False) -> dict:
     if not bundled_dir.exists():
         return {
             "copied": [], "updated": [], "skipped": 0,
-            "user_modified": [], "cleaned": [], "total_bundled": 0,
+            "user_modified": [], "cleaned": [], "retired_removed": [],
+            "retired_preserved": [], "total_bundled": 0,
         }
 
     SKILLS_DIR.mkdir(parents=True, exist_ok=True)
@@ -290,6 +365,8 @@ def sync_skills(quiet: bool = False) -> dict:
             # ── In manifest but not on disk — user deleted it ──
             skipped += 1
 
+    retired_removed, retired_preserved = _cleanup_retired_bundled_skills(manifest)
+
     # Clean stale manifest entries (skills removed from bundled dir)
     cleaned = sorted(set(manifest.keys()) - bundled_names)
     for name in cleaned:
@@ -314,6 +391,8 @@ def sync_skills(quiet: bool = False) -> dict:
         "skipped": skipped,
         "user_modified": user_modified,
         "cleaned": cleaned,
+        "retired_removed": retired_removed,
+        "retired_preserved": retired_preserved,
         "total_bundled": len(bundled_skills),
     }
 
@@ -426,6 +505,10 @@ if __name__ == "__main__":
     ]
     if result["user_modified"]:
         parts.append(f"{len(result['user_modified'])} user-modified (kept)")
+    if result["retired_removed"]:
+        parts.append(f"{len(result['retired_removed'])} retired removed")
+    if result["retired_preserved"]:
+        parts.append(f"{len(result['retired_preserved'])} retired preserved")
     if result["cleaned"]:
         parts.append(f"{len(result['cleaned'])} cleaned from manifest")
     print(f"\nDone: {', '.join(parts)}. {result['total_bundled']} total bundled.")
