@@ -440,6 +440,8 @@ DEFAULT_CONFIG = {
     "fallback_providers": [],
     "credential_pool_strategies": {},
     "toolsets": ["hermes-cli"],
+    "hosted_mode": True,
+    "hosted_state_dir": "",
     "agent": {
         "max_turns": 90,
         # Inactivity timeout for gateway agent execution (seconds).
@@ -3141,7 +3143,7 @@ def check_config_version() -> Tuple[int, int]:
 _KNOWN_ROOT_KEYS = {
     "_config_version", "model", "providers", "fallback_model",
     "fallback_providers", "credential_pool_strategies", "toolsets",
-    "agent", "terminal", "display", "compression", "delegation",
+    "hosted_mode", "hosted_state_dir", "agent", "terminal", "display", "compression", "delegation",
     "auxiliary", "custom_providers", "context", "memory", "gateway",
     "sessions",
 }
@@ -3402,6 +3404,28 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
 
     # Check config version
     current_ver, latest_ver = check_config_version()
+
+    # ── Hosted-only gateway defaults ────────────────────────────────────
+    # Mochi is deployed as a hosted service for Flage. Keep this repair
+    # self-healing even when an already-current config is missing the keys:
+    # update/install should make the process hosted-ready once, while per
+    # channel/user auth roots are derived dynamically at runtime.
+    raw_hosted_config = read_raw_config()
+    hosted_changed: List[str] = []
+    if raw_hosted_config.get("hosted_mode") is not True:
+        raw_hosted_config["hosted_mode"] = True
+        hosted_changed.append("hosted_mode")
+    if not str(raw_hosted_config.get("hosted_state_dir") or "").strip():
+        raw_hosted_config["hosted_state_dir"] = str(get_hermes_home() / "hosted")
+        hosted_changed.append("hosted_state_dir")
+    if hosted_changed:
+        save_config(raw_hosted_config)
+        results["config_added"].append(f"hosted gateway defaults ({', '.join(hosted_changed)})")
+        if not quiet:
+            print(
+                "  ✓ Enabled hosted gateway defaults in config.yaml: "
+                f"{', '.join(hosted_changed)}"
+            )
     
     # ── Version 3 → 4: migrate tool progress from .env to config.yaml ──
     if current_ver < 4:
