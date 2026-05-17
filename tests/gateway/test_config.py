@@ -290,6 +290,23 @@ class TestLoadGatewayConfig:
 
         assert config.thread_sessions_per_user is True
 
+    def test_bridges_hosted_mode_from_config_yaml(self, tmp_path, monkeypatch):
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        hosted_root = hermes_home / "hosted"
+        config_path = hermes_home / "config.yaml"
+        config_path.write_text(
+            f"hosted_mode: true\nhosted_state_dir: {hosted_root}\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+        config = load_gateway_config()
+
+        assert config.hosted_mode is True
+        assert config.hosted_state_dir == hosted_root
+
     def test_thread_sessions_per_user_defaults_to_false(self, tmp_path, monkeypatch):
         hermes_home = tmp_path / ".hermes"
         hermes_home.mkdir()
