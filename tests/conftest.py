@@ -5,11 +5,9 @@ Hermetic-test invariants enforced here (see AGENTS.md for rationale):
 1. **No credential env vars.** All provider/credential-shaped env vars
    (ending in _API_KEY, _TOKEN, _SECRET, _PASSWORD, _CREDENTIALS, etc.)
    are unset before every test. Local developer keys cannot leak in.
-2. **Isolated HERMES_HOME.** HERMES_HOME points to a per-test tempdir so
-   code reading ``~/.hermes/*`` via ``get_hermes_home()`` can't see the
-   real one. (We do NOT also redirect HOME — that broke subprocesses in
-   CI. Code using ``Path.home() / ".hermes"`` instead of the canonical
-   ``get_hermes_home()`` is a bug to fix at the callsite.)
+2. **Isolated agent homes.** HERMES_HOME, CODEX_HOME, Claude config/home,
+   Growth MCP auth, and hosted Mochi state point to per-test tempdirs so tests
+   cannot mutate a developer's real agent state.
 3. **Deterministic runtime.** TZ=UTC, LANG=C.UTF-8, PYTHONHASHSEED=0.
 4. **No HERMES_SESSION_* inheritance** — the agent's current gateway
    session must not leak into tests.
@@ -188,6 +186,15 @@ _HERMES_BEHAVIORAL_VARS = frozenset({
     "HERMES_BACKGROUND_NOTIFICATIONS",
     "HERMES_EXEC_ASK",
     "HERMES_HOME_MODE",
+    "MOCHI_HOSTED_MODE",
+    "MOCHI_HOSTED_STATE_ROOT",
+    "MOCHI_HOSTED_GATEWAY_AUTH_ROOT",
+    "MOCHI_HOSTED_FILESYSTEM_ROOT",
+    "CODEX_HOME",
+    "CLAUDE_HOME",
+    "CLAUDE_CONFIG_DIR",
+    "GROWTH_MCP_AUTH_DIR",
+    "GROWTH_MCP_BROWSER_PROFILE_DIR",
     # Kanban path/board pins must never leak from a developer shell or
     # dispatched worker into tests; otherwise tests can write fake tasks to
     # the real ~/.hermes/kanban.db instead of the per-test HERMES_HOME.
@@ -294,8 +301,9 @@ _HERMES_BEHAVIORAL_VARS = frozenset({
 def _hermetic_environment(tmp_path, monkeypatch):
     """Blank out all credential/behavioral env vars so local and CI match.
 
-    Also redirects HOME and HERMES_HOME to per-test tempdirs so code that
-    reads ``~/.hermes/*`` can't touch the real one, and pins TZ/LANG so
+    Also redirects agent home/config dirs to per-test tempdirs so tests that
+    exercise hosted, Codex, Claude, or Growth auth setup can't touch the real
+    ones, and pins TZ/LANG so
     datetime/locale-sensitive tests are deterministic.
     """
     # 1. Blank every credential-shaped env var that's currently set.
@@ -307,16 +315,14 @@ def _hermetic_environment(tmp_path, monkeypatch):
     for name in _HERMES_BEHAVIORAL_VARS:
         monkeypatch.delenv(name, raising=False)
 
-    # 3. Redirect HERMES_HOME to a per-test tempdir. Code that reads
-    #    ``~/.hermes/*`` via ``get_hermes_home()`` now gets the tempdir.
-    #
-    #    NOTE: We do NOT also redirect HOME. Doing so broke CI because
-    #    some tests (and their transitive deps) spawn subprocesses that
-    #    inherit HOME and expect it to be stable. If a test genuinely
-    #    needs HOME isolated, it should set it explicitly in its own
-    #    fixture. Any code in the codebase reading ``~/.hermes/*`` via
-    #    ``Path.home() / ".hermes"`` instead of ``get_hermes_home()``
-    #    is a bug to fix at the callsite.
+    # 3. Redirect HOME and all agent homes to per-test tempdirs. Hosted Mochi
+    #    tests exercise code that configures Codex, Claude, Growth MCP auth,
+    #    browser profiles, and HERMES_HOME; none of those paths may point at a
+    #    developer's permanent agent state.
+    fake_home = tmp_path / "home_test"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+
     fake_hermes_home = tmp_path / "hermes_test"
     fake_hermes_home.mkdir()
     (fake_hermes_home / "sessions").mkdir()
@@ -324,6 +330,28 @@ def _hermetic_environment(tmp_path, monkeypatch):
     (fake_hermes_home / "memories").mkdir()
     (fake_hermes_home / "skills").mkdir()
     monkeypatch.setenv("HERMES_HOME", str(fake_hermes_home))
+
+    fake_codex_home = tmp_path / "codex_test"
+    fake_claude_home = tmp_path / "claude_test"
+    fake_claude_config = tmp_path / "claude_config_test"
+    fake_growth_auth = tmp_path / "growth_mcp_auth_test"
+    fake_growth_browser = tmp_path / "growth_mcp_browser_test"
+    fake_hosted_state = tmp_path / "mochi_hosted_state_test"
+    for _path in (
+        fake_codex_home,
+        fake_claude_home,
+        fake_claude_config,
+        fake_growth_auth,
+        fake_growth_browser,
+        fake_hosted_state,
+    ):
+        _path.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CODEX_HOME", str(fake_codex_home))
+    monkeypatch.setenv("CLAUDE_HOME", str(fake_claude_home))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(fake_claude_config))
+    monkeypatch.setenv("GROWTH_MCP_AUTH_DIR", str(fake_growth_auth))
+    monkeypatch.setenv("GROWTH_MCP_BROWSER_PROFILE_DIR", str(fake_growth_browser))
+    monkeypatch.setenv("MOCHI_HOSTED_STATE_ROOT", str(fake_hosted_state))
 
     # 4. Deterministic locale / timezone / hashseed. CI runs in UTC with
     #    C.UTF-8 locale; local dev often doesn't. Pin everything.
@@ -431,7 +459,12 @@ def _reset_module_state():
             _sc_mod._SESSION_THREAD_ID,
             _sc_mod._SESSION_USER_ID,
             _sc_mod._SESSION_USER_NAME,
+            _sc_mod._SESSION_GUILD_ID,
             _sc_mod._SESSION_KEY,
+            _sc_mod._SESSION_ID,
+            _sc_mod._GATEWAY_AUTH_SCOPE,
+            _sc_mod._HOSTED_GATEWAY_AUTH_ROOT,
+            _sc_mod._HOSTED_FILESYSTEM_ROOT,
             _sc_mod._CRON_AUTO_DELIVER_PLATFORM,
             _sc_mod._CRON_AUTO_DELIVER_CHAT_ID,
             _sc_mod._CRON_AUTO_DELIVER_THREAD_ID,

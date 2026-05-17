@@ -13,6 +13,7 @@ def test_scoped_growth_mcp_env_is_deterministic(monkeypatch):
         platform="slack",
         gateway_auth_scope="slack:T123",
         hosted_gateway_auth_root="/tmp/mochi-hosted/state/slack_T123/auth",
+        hosted_scope_assertion="assertion-secret",
     )
     pool = MCPAuthScopePool(
         "growth",
@@ -31,6 +32,7 @@ def test_scoped_growth_mcp_env_is_deterministic(monkeypatch):
         assert env["EXISTING"] == "1"
         assert env["GROWTH_MCP_GATEWAY"] == "1"
         assert env["GROWTH_MCP_AUTH_SCOPE"] == "slack:T123"
+        assert env["GROWTH_MCP_HOSTED_SCOPE_ASSERTION"] == "assertion-secret"
         assert env["GROWTH_MCP_BROWSER_PROVIDER"] == "chrome"
         assert env["GROWTH_MCP_AUTH_DIR"] == "/tmp/mochi-hosted/state/slack_T123/auth/5249716b4889950720258f96f38360b7"
         assert env["GROWTH_MCP_BROWSER_PROFILE_DIR"] == env["GROWTH_MCP_AUTH_DIR"] + "/browser"
@@ -84,6 +86,22 @@ def test_gateway_growth_mcp_without_explicit_scope_fails_closed(monkeypatch):
 
     assert "per_auth_scope: true" in message
     assert "Refusing to start an unscoped Growth MCP process" in message
+
+
+def test_gateway_growth_mcp_with_explicit_false_scope_fails_closed(monkeypatch):
+    monkeypatch.setenv("_HERMES_GATEWAY", "1")
+
+    try:
+        _assert_gateway_growth_mcp_is_explicitly_scoped(
+            "growth",
+            {"command": "npx", "args": ["-y", "growth-mcp@latest", "serve"], "per_auth_scope": False},
+        )
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected explicitly unscoped Growth MCP gateway config to fail")
+
+    assert "per_auth_scope: true" in message
 
 
 def test_gateway_non_growth_mcp_without_explicit_scope_is_allowed(monkeypatch):
