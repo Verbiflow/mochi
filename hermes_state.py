@@ -329,8 +329,8 @@ class SessionDB:
     # Attempt a PASSIVE WAL checkpoint every N successful writes.
     _CHECKPOINT_EVERY_N_WRITES = 50
 
-    def __init__(self, db_path: Path = None):
-        self.db_path = db_path or DEFAULT_DB_PATH
+    def __init__(self, db_path: Path | None = None):
+        self.db_path = db_path or (get_hermes_home() / "state.db")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._lock = threading.Lock()
@@ -2963,4 +2963,3 @@ class SessionDB:
                 (error[:500], session_id),
             )
         self._execute_write(_do)
-

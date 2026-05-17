@@ -23,11 +23,12 @@ Public API (signatures preserved from the original 2,400-line version):
 import json
 import asyncio
 import logging
+import os
 import threading
 import time
 from typing import Dict, Any, List, Optional, Tuple
 
-from tools.registry import discover_builtin_tools, registry
+from tools.registry import discover_builtin_tools, invalidate_check_fn_cache, registry
 from toolsets import resolve_toolset, validate_toolset
 
 logger = logging.getLogger(__name__)
@@ -259,6 +260,45 @@ _LEGACY_TOOLSET_MAP = {
 # inner check_fn TTL cache in registry.py handles environment drift (Docker
 # daemon start/stop, env var changes, etc.) on a 30 s horizon.
 _tool_defs_cache: Dict[tuple, List[Dict[str, Any]]] = {}
+_last_dynamic_availability_fp: tuple | None = None
+
+
+def _dynamic_availability_fingerprint(enabled_toolsets: List[str] | None) -> tuple | None:
+    """Fingerprint runtime inputs that affect terminal/code tool availability."""
+    if enabled_toolsets is not None and not (
+        {"terminal", "code_execution"} & set(enabled_toolsets)
+    ):
+        return None
+
+    try:
+        from tools import terminal_tool as _terminal_tool
+
+        terminal_cfg = _terminal_tool._get_env_config()
+    except Exception:
+        terminal_cfg = None
+
+    try:
+        cfg_blob = json.dumps(terminal_cfg, sort_keys=True, default=str)
+    except TypeError:
+        cfg_blob = repr(terminal_cfg)
+
+    auth_env = tuple(
+        (name, os.getenv(name, ""))
+        for name in (
+            "TERMINAL_ENV",
+            "TERMINAL_VERCEL_RUNTIME",
+            "VERCEL_OIDC_TOKEN",
+            "VERCEL_TOKEN",
+            "VERCEL_PROJECT_ID",
+            "VERCEL_TEAM_ID",
+            "MODAL_TOKEN_ID",
+            "MODAL_TOKEN_SECRET",
+            "DAYTONA_API_KEY",
+            "TERMINAL_SSH_HOST",
+            "TERMINAL_SSH_USER",
+        )
+    )
+    return ("terminal", cfg_blob, auth_env)
 
 
 def _clear_tool_defs_cache() -> None:
@@ -294,6 +334,12 @@ def get_tool_definitions(
     # user-visible config edits that affect dynamic schemas (execute_code
     # mode, discord action allowlist, etc.) without needing an explicit
     # invalidate hook on every config-writer.
+    availability_fp = _dynamic_availability_fingerprint(enabled_toolsets)
+    global _last_dynamic_availability_fp
+    if availability_fp != _last_dynamic_availability_fp:
+        invalidate_check_fn_cache()
+        _last_dynamic_availability_fp = availability_fp
+
     if quiet_mode:
         try:
             from hermes_cli.config import get_config_path
@@ -307,6 +353,7 @@ def get_tool_definitions(
             frozenset(disabled_toolsets) if disabled_toolsets else None,
             registry._generation,
             cfg_fp,
+            availability_fp,
         )
         cached = _tool_defs_cache.get(cache_key)
         if cached is not None:
@@ -388,6 +435,20 @@ def _compute_tool_definitions(
 
     # Ask the registry for schemas (only returns tools whose check_fn passes)
     filtered_tools = registry.get_definitions(tools_to_include, quiet=quiet_mode)
+    tool_to_toolset = registry.get_tool_to_toolset_map()
+    toolset_available: Dict[str, bool] = {}
+    available_filtered_tools = []
+    for tool_def in filtered_tools:
+        tool_name = tool_def.get("function", {}).get("name")
+        toolset = tool_to_toolset.get(tool_name)
+        if not toolset:
+            available_filtered_tools.append(tool_def)
+            continue
+        if toolset not in toolset_available:
+            toolset_available[toolset] = registry.is_toolset_available(toolset)
+        if toolset_available[toolset]:
+            available_filtered_tools.append(tool_def)
+    filtered_tools = available_filtered_tools
 
     # The set of tool names that actually passed check_fn filtering.
     # Use this (not tools_to_include) for any downstream schema that references
