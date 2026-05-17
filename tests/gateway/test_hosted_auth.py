@@ -10,7 +10,8 @@ from gateway.config import GatewayConfig, Platform, PlatformConfig
 from gateway.hosted import HostedScopeStore, resolve_hosted_context, source_with_hosted_context
 from gateway.platforms.base import EphemeralReply, MessageEvent, MessageType
 from gateway.run import GatewayRunner
-from gateway.session import SessionSource, build_session_key
+from gateway.session import SessionContext, SessionSource, build_session_key
+from gateway.session_context import clear_session_vars, get_session_env
 from gateway.usage import build_hosted_usage_event, record_hosted_usage_event
 
 
@@ -43,7 +44,37 @@ def _runner(state_root: Path) -> GatewayRunner:
             )
         },
     )
-    return GatewayRunner(config)
+    runner = GatewayRunner(config)
+    runner._upsert_hosted_scope_via_bridge = lambda context, issue_claim_assertion=False: _backend_scope_payload(
+        context,
+        claim_assertion="assertion-secret" if issue_claim_assertion else None,
+    )
+    return runner
+
+
+def _backend_scope_payload(context, *, claim_assertion: str | None = None) -> dict[str, object]:
+    return {
+        "hosted_scope_id": context.hosted_scope_id,
+        "scope_kind": context.scope_kind,
+        "platform": context.platform,
+        "platform_workspace_id": context.platform_workspace_id or None,
+        "platform_channel_id": context.platform_channel_id or None,
+        "platform_conversation_id": context.conversation_scope_id or None,
+        "growth_auth_user_id": None,
+        "claimed_user_id": None,
+        "selected_org_id": context.selected_org_id,
+        "selected_org_slug": context.selected_org_slug,
+        "claim_token_id": None,
+        "scope_status": "active",
+        "reset_to_hosted_scope_id": None,
+        "scope_key": context.hosted_scope_id,
+        "claim_assertion": claim_assertion,
+        "claim_assertion_expires_at": "2099-01-01T00:00:00+00:00" if claim_assertion else None,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "claimed_at": None,
+        "last_used_at": "2026-01-01T00:00:00+00:00",
+        "metadata": {},
+    }
 
 
 def test_slack_workspace_scope_is_shared_and_sender_is_not_part_of_session_key(tmp_path: Path) -> None:
@@ -99,6 +130,60 @@ async def test_auth_channel_and_workspace_are_ephemeral_control_plane_commands(t
 
 
 @pytest.mark.asyncio
+async def test_auth_channel_does_not_keep_local_override_when_backend_persist_fails(tmp_path: Path) -> None:
+    state_root = tmp_path / "hosted"
+    runner = _runner(state_root)
+    calls = {"count": 0}
+
+    def _upsert(context, issue_claim_assertion=False):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return _backend_scope_payload(context)
+        return None
+
+    runner._upsert_hosted_scope_via_bridge = _upsert
+    source = _slack_source()
+
+    result = await runner._handle_auth_command(_event("/auth channel", source))
+
+    assert isinstance(result, EphemeralReply)
+    assert "could not be persisted" in result
+    resolved = resolve_hosted_context(source, state_root=state_root)
+    assert resolved.hosted_scope_id == "slack:T123"
+    assert resolved.using_channel_override is False
+
+
+def test_hosted_message_scope_upsert_failure_fails_closed(tmp_path: Path) -> None:
+    runner = _runner(tmp_path / "hosted")
+    runner._upsert_hosted_scope_via_bridge = lambda context, issue_claim_assertion=False: None
+
+    with pytest.raises(RuntimeError, match="could not resolve scope with the bridge"):
+        runner._with_hosted_context(_event("hello", _slack_source()))
+
+
+def test_hosted_session_env_includes_memory_and_browser_roots(tmp_path: Path) -> None:
+    state_root = tmp_path / "hosted"
+    runner = _runner(state_root)
+    source = source_with_hosted_context(
+        _slack_source(),
+        resolve_hosted_context(_slack_source(), state_root=state_root),
+    )
+    context = SessionContext(
+        source=source,
+        connected_platforms=[],
+        home_channels={},
+        session_key="agent:hosted:slack:T123",
+    )
+
+    tokens = runner._set_session_env(context)
+    try:
+        assert get_session_env("MOCHI_HOSTED_MEMORY_ROOT", "").endswith("/state/slack_T123/memory")
+        assert get_session_env("MOCHI_HOSTED_BROWSER_PROFILE_ROOT", "").endswith("/state/slack_T123/browser")
+    finally:
+        clear_session_vars(tokens)
+
+
+@pytest.mark.asyncio
 async def test_auth_status_is_user_allowed_but_group_claim_and_override_are_admin_only(tmp_path: Path) -> None:
     runner = _runner(tmp_path / "hosted")
     runner._claim_hosted_scope_via_growth_mcp = lambda source, email: {
@@ -145,7 +230,7 @@ async def test_auth_claim_does_not_mint_fake_local_tokens_without_growth_mcp(tmp
     result = await runner._handle_auth_command(_event("/auth claim", source))
 
     assert isinstance(result, EphemeralReply)
-    assert "hosted-scope assertion" in result
+    assert "Growth MCP auth is not configured" in result
 
 
 @pytest.mark.asyncio
@@ -170,6 +255,23 @@ async def test_auth_claim_uses_growth_mcp_oauth_claim_url(tmp_path: Path) -> Non
 async def test_auth_use_does_not_persist_workspace_without_growth_mcp_membership(tmp_path: Path) -> None:
     state_root = tmp_path / "hosted"
     runner = _runner(state_root)
+    source = _slack_source()
+
+    result = await runner._handle_auth_command(_event("/auth use acme", source))
+
+    assert isinstance(result, EphemeralReply)
+    assert "Workspace selection is unavailable" in result
+    resolved = resolve_hosted_context(source, state_root=state_root)
+    assert resolved.selected_org_id is None
+    assert resolved.selected_org_slug is None
+
+
+@pytest.mark.asyncio
+async def test_auth_use_selects_workspace_through_scoped_growth_mcp(tmp_path: Path) -> None:
+    from tools.registry import registry
+
+    state_root = tmp_path / "hosted"
+    runner = _runner(state_root)
     runner._persist_hosted_workspace_selection_via_bridge = lambda source, org_ref, org_slug: {
         "hosted_scope_id": "slack:T123",
         "scope_kind": "workspace",
@@ -188,23 +290,6 @@ async def test_auth_use_does_not_persist_workspace_without_growth_mcp_membership
         "last_used_at": "2026-01-01T00:00:00+00:00",
         "metadata": {},
     }
-    source = _slack_source()
-
-    result = await runner._handle_auth_command(_event("/auth use acme", source))
-
-    assert isinstance(result, EphemeralReply)
-    assert "Workspace selection is unavailable" in result
-    resolved = resolve_hosted_context(source, state_root=state_root)
-    assert resolved.selected_org_id is None
-    assert resolved.selected_org_slug is None
-
-
-@pytest.mark.asyncio
-async def test_auth_use_selects_workspace_through_scoped_growth_mcp(tmp_path: Path) -> None:
-    from tools.registry import registry
-
-    state_root = tmp_path / "hosted"
-    runner = _runner(state_root)
     source = _slack_source()
     seen: dict[str, object] = {}
 

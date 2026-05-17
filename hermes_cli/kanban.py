@@ -2235,7 +2235,16 @@ def run_slash(rest: str) -> str:
         body = err or out
         return f"⚠ /kanban usage error\n{body}" if body else "⚠ /kanban usage error"
     except argparse.ArgumentError as exc:
-        return f"⚠ /kanban usage error: {exc}"
+        usage = ""
+        if tokens:
+            for _action in kanban_parser._actions:
+                if isinstance(_action, argparse._SubParsersAction):
+                    choice = _action.choices.get(tokens[0])
+                    if choice is not None:
+                        usage = choice.format_usage().rstrip()
+                    break
+        body = f"{usage}\n{exc}" if usage else str(exc)
+        return f"⚠ /kanban usage error\n{body}"
 
     with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
         try:

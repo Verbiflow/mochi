@@ -61,6 +61,27 @@ def _make_runner(platform: Platform):
 
 
 @pytest.mark.asyncio
+async def test_source_less_message_is_dropped_before_hook(monkeypatch):
+    """A source-less user event cannot be authorized or dispatched."""
+    called = {"count": 0}
+
+    def _fake_hook(name, **kwargs):
+        called["count"] += 1
+        return [{"action": "skip", "reason": "plugin-handled"}]
+
+    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", _fake_hook)
+
+    runner, adapter = _make_runner(Platform.WHATSAPP)
+    result = await runner._handle_message(
+        MessageEvent(text="hi", message_id="m-source-less", source=None)
+    )
+
+    assert result is None
+    assert called["count"] == 0
+    adapter.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_hook_skip_short_circuits_dispatch(monkeypatch):
     """A plugin returning {'action': 'skip'} drops the message before auth."""
     _clear_auth_env(monkeypatch)

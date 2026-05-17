@@ -97,6 +97,8 @@ def test_checker_returns_true_when_configured(platform, checker, monkeypatch):
         mock_config.extra = {"app_id": "app", "app_secret": "sec"}
     elif platform == Platform.DINGTALK:
         mock_config.extra = {"client_id": "id", "client_secret": "sec"}
+    elif platform == Platform.GOOGLE_CHAT:
+        mock_config.extra = {"project_id": "project", "subscription_name": "sub"}
     else:
         pytest.skip(f"No synthetic config defined for {platform.value}")
 

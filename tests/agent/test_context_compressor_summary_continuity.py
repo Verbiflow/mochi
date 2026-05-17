@@ -7,13 +7,15 @@ from agent.context_compressor import ContextCompressor, SUMMARY_PREFIX
 
 def _compressor() -> ContextCompressor:
     with patch("agent.context_compressor.get_model_context_length", return_value=100000):
-        return ContextCompressor(
+        compressor = ContextCompressor(
             model="test/model",
             threshold_percent=0.85,
             protect_first_n=1,
             protect_last_n=1,
             quiet_mode=True,
         )
+    compressor.tail_token_budget = 20
+    return compressor
 
 
 def _response(content: str):
@@ -24,9 +26,14 @@ def _response(content: str):
 
 
 def _messages_with_handoff(summary_body: str):
+    large_middle = "middle details that must be summarized " * 200
     return [
         {"role": "system", "content": "system prompt"},
         {"role": "user", "content": f"{SUMMARY_PREFIX}\n{summary_body}"},
+        {"role": "assistant", "content": large_middle},
+        {"role": "user", "content": large_middle},
+        {"role": "assistant", "content": large_middle},
+        {"role": "user", "content": large_middle},
         {"role": "user", "content": "new user turn after resume"},
         {"role": "assistant", "content": "new assistant work after resume"},
         {"role": "user", "content": "more new work after resume"},
