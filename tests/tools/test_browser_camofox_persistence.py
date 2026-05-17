@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from gateway.session_context import clear_session_vars, set_session_vars
 from tools.browser_camofox import (
     _drop_session,
     _get_session,
@@ -145,6 +146,36 @@ class TestManagedPersistenceMode:
             s2 = _get_session("task-1")
             assert s2["user_id"] != uid_a
 
+    def test_hosted_browser_roots_get_isolated_sessions_for_same_task(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MOCHI_HOSTED_MODE", "true")
+        monkeypatch.setenv("CAMOFOX_URL", "http://localhost:9377")
+
+        with _enable_persistence():
+            tokens_a = set_session_vars(
+                platform="slack",
+                hosted_browser_profile_root=str(tmp_path / "hosted" / "state" / "slack_T123" / "browser"),
+            )
+            try:
+                session_a = _get_session("task-1")
+                identity_a = get_camofox_identity("task-1")
+            finally:
+                clear_session_vars(tokens_a)
+
+            tokens_b = set_session_vars(
+                platform="slack",
+                hosted_browser_profile_root=str(tmp_path / "hosted" / "state" / "slack_T123_C456" / "browser"),
+            )
+            try:
+                session_b = _get_session("task-1")
+                identity_b = get_camofox_identity("task-1")
+            finally:
+                clear_session_vars(tokens_b)
+
+        assert session_a is not session_b
+        assert session_a["user_id"] == identity_a["user_id"]
+        assert session_b["user_id"] == identity_b["user_id"]
+        assert session_a["user_id"] != session_b["user_id"]
+
     def test_navigate_uses_stable_identity(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         monkeypatch.setenv("CAMOFOX_URL", "http://localhost:9377")
@@ -215,6 +246,20 @@ class TestConfiguredCamofoxIdentity:
             params={"userId": "shared-camofox"},
             timeout=5,
         )
+
+    def test_env_identity_override_is_rejected_in_hosted_mode(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MOCHI_HOSTED_MODE", "true")
+        monkeypatch.setenv("CAMOFOX_URL", "http://localhost:9377")
+        monkeypatch.setenv("CAMOFOX_USER_ID", "shared-camofox")
+        tokens = set_session_vars(
+            platform="slack",
+            hosted_browser_profile_root=str(tmp_path / "hosted" / "state" / "slack_T123" / "browser"),
+        )
+        try:
+            with pytest.raises(RuntimeError, match="not allowed in hosted mode"):
+                _get_session("task-1")
+        finally:
+            clear_session_vars(tokens)
 
     def test_config_identity_is_used_when_env_is_absent(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -302,7 +347,7 @@ class TestConfiguredCamofoxIdentity:
         assert result is True
         import tools.browser_camofox as mod
         with mod._sessions_lock:
-            assert "task-1" not in mod._sessions
+            assert not any(key.endswith(":task-1") for key in mod._sessions)
 
 
 class TestVncUrlDiscovery:
@@ -369,7 +414,7 @@ class TestCamofoxSoftCleanup:
         # Session should have been dropped from in-memory store
         import tools.browser_camofox as mod
         with mod._sessions_lock:
-            assert "task-1" not in mod._sessions
+            assert not any(key.endswith(":task-1") for key in mod._sessions)
 
     def test_returns_false_when_disabled(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -384,7 +429,7 @@ class TestCamofoxSoftCleanup:
         # Session should still be present — not dropped
         import tools.browser_camofox as mod
         with mod._sessions_lock:
-            assert "task-1" in mod._sessions
+            assert any(key.endswith(":task-1") for key in mod._sessions)
 
     def test_does_not_call_server_delete(self, tmp_path, monkeypatch):
         """Soft cleanup must never hit the Camofox /sessions DELETE endpoint."""

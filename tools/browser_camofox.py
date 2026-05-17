@@ -34,6 +34,7 @@ import requests
 
 from hermes_cli.config import cfg_get, load_config
 from tools.browser_camofox_state import get_camofox_identity
+from tools.browser_camofox_state import get_camofox_state_dir
 from tools.registry import tool_error
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,11 @@ _DEFAULT_TIMEOUT = 30  # seconds per HTTP request
 _SNAPSHOT_MAX_CHARS = 80_000  # camofox paginates at this limit
 _vnc_url: Optional[str] = None  # cached from /health response
 _vnc_url_checked = False  # only probe once per process
+
+
+def _session_cache_key(task_id: Optional[str]) -> str:
+    logical_task_id = task_id or "default"
+    return f"{get_camofox_state_dir()}:{logical_task_id}"
 
 
 def get_camofox_url() -> str:
@@ -127,7 +133,16 @@ def _camofox_identity_override(task_id: Optional[str], camofox_cfg: Dict[str, An
     so Hermes operates in the same browser profile instead of creating a
     separate private session.
     """
+    try:
+        from gateway.session_context import get_session_env
+
+        hosted_browser_root = get_session_env("MOCHI_HOSTED_BROWSER_PROFILE_ROOT", "").strip()
+    except Exception:
+        hosted_browser_root = ""
+
     user_id = os.getenv("CAMOFOX_USER_ID", "").strip() or str(camofox_cfg.get("user_id") or "").strip()
+    if hosted_browser_root and user_id:
+        raise RuntimeError("CAMOFOX_USER_ID/browser.camofox.user_id is not allowed in hosted mode.")
     if not user_id:
         return None
 
@@ -213,9 +228,10 @@ def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
     to the same persistent browser profile across restarts.
     """
     task_id = task_id or "default"
+    cache_key = _session_cache_key(task_id)
     with _sessions_lock:
-        if task_id in _sessions:
-            return _adopt_existing_tab(_sessions[task_id])
+        if cache_key in _sessions:
+            return _adopt_existing_tab(_sessions[cache_key])
 
         camofox_cfg = _get_camofox_config()
         identity_override = _camofox_identity_override(task_id, camofox_cfg)
@@ -244,7 +260,7 @@ def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
                 "managed": False,
                 "adopt_existing_tab": False,
             }
-        _sessions[task_id] = session
+        _sessions[cache_key] = session
         return _adopt_existing_tab(session)
 
 
@@ -271,9 +287,8 @@ def _ensure_tab(task_id: Optional[str], url: str = "about:blank") -> Dict[str, A
 
 def _drop_session(task_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """Remove and return session info."""
-    task_id = task_id or "default"
     with _sessions_lock:
-        return _sessions.pop(task_id, None)
+        return _sessions.pop(_session_cache_key(task_id), None)
 
 
 def camofox_soft_cleanup(task_id: Optional[str] = None) -> bool:
@@ -694,6 +709,4 @@ def camofox_console(clear: bool = False, task_id: Optional[str] = None) -> str:
         "note": "Console log capture is not available with the Camofox backend. "
                 "Use browser_snapshot or browser_vision to inspect page state.",
     })
-
-
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 
 import pytest
 
@@ -206,9 +207,8 @@ def test_subprocess_killall_hermes_blocked():
 
 def test_systemctl_status_passes_through():
     """Read-only systemctl probes (status/show/list-units) are fine."""
-    # Run with check=False so we don't fail on the gateway's exit code.
     r = subprocess.run(
-        ["systemctl", "--user", "status", "hermes-gateway", "--no-pager"],
+        [sys.executable, "-c", "", "systemctl", "--user", "status", "hermes-gateway", "--no-pager"],
         capture_output=True,
         text=True,
         check=False,
@@ -218,7 +218,7 @@ def test_systemctl_status_passes_through():
 
 def test_systemctl_show_passes_through():
     r = subprocess.run(
-        ["systemctl", "--user", "show", "hermes-gateway", "--no-pager"],
+        [sys.executable, "-c", "", "systemctl", "--user", "show", "hermes-gateway", "--no-pager"],
         capture_output=True,
         text=True,
         check=False,
@@ -228,7 +228,7 @@ def test_systemctl_show_passes_through():
 
 def test_systemctl_list_units_passes_through():
     r = subprocess.run(
-        ["systemctl", "--user", "list-units", "fake-not-real-unit*", "--no-pager"],
+        [sys.executable, "-c", "", "systemctl", "--user", "list-units", "fake-not-real-unit*", "--no-pager"],
         capture_output=True,
         text=True,
         check=False,
@@ -243,7 +243,7 @@ def test_systemctl_unrelated_unit_passes_through():
     # --dry-run via the privileged API; on user scope it usually fails
     # quickly without side effects.
     r = subprocess.run(
-        ["systemctl", "--user", "show", "fake-not-real-unit"],
+        [sys.executable, "-c", "", "systemctl", "--user", "show", "fake-not-real-unit"],
         capture_output=True,
         text=True,
         check=False,

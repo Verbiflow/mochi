@@ -53,7 +53,21 @@ logger = logging.getLogger(__name__)
 # constant was cached at import time and could go stale if a profile switch
 # happened after the first import.
 def get_memory_dir() -> Path:
-    """Return the profile-scoped memories directory."""
+    """Return the active memory directory.
+
+    Hosted gateway turns must use the task-local hosted memory root. Falling
+    back to ``HERMES_HOME/memories`` in hosted mode would mix tenants.
+    """
+    try:
+        from gateway.session_context import get_session_env
+
+        hosted_root = get_session_env("MOCHI_HOSTED_MEMORY_ROOT", "").strip()
+        if hosted_root:
+            return Path(hosted_root).expanduser()
+    except Exception:
+        hosted_root = ""
+    if os.getenv("MOCHI_HOSTED_MODE", "").strip().lower() in {"1", "true", "yes", "on"}:
+        raise RuntimeError("Hosted memory root is not set; refusing to use global HERMES_HOME memories.")
     return get_hermes_home() / "memories"
 
 ENTRY_DELIMITER = "\n§\n"
@@ -580,7 +594,6 @@ registry.register(
     check_fn=check_memory_requirements,
     emoji="🧠",
 )
-
 
 
 

@@ -9,6 +9,7 @@ across restarts.
 
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 from typing import Dict, Optional
@@ -21,6 +22,16 @@ CAMOFOX_STATE_SUBDIR = "camofox"
 
 def get_camofox_state_dir() -> Path:
     """Return the profile-scoped root directory for Camofox persistence."""
+    try:
+        from gateway.session_context import get_session_env
+
+        hosted_root = get_session_env("MOCHI_HOSTED_BROWSER_PROFILE_ROOT", "").strip()
+        if hosted_root:
+            return Path(hosted_root).expanduser() / CAMOFOX_STATE_SUBDIR
+    except Exception:
+        hosted_root = ""
+    if os.getenv("MOCHI_HOSTED_MODE", "").strip().lower() in {"1", "true", "yes", "on"}:
+        raise RuntimeError("Hosted browser profile root is not set; refusing to use global Camofox state.")
     return get_hermes_home() / CAMOFOX_STATE_DIR_NAME / CAMOFOX_STATE_SUBDIR
 
 

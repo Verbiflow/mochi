@@ -226,3 +226,40 @@ def test_hosted_mode_disables_local_terminal_backend(tmp_path, monkeypatch):
         clear_session_vars(tokens)
 
     assert "Local terminal is disabled in hosted mode" in result
+
+
+def test_hosted_memory_uses_scope_local_root(tmp_path, monkeypatch):
+    from tools.memory_tool import MemoryStore, get_memory_dir
+
+    hermes_home = tmp_path / "home"
+    hosted_memory = tmp_path / "hosted" / "state" / "slack_T123" / "memory"
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("MOCHI_HOSTED_MODE", "true")
+    tokens = set_session_vars(platform="slack", hosted_memory_root=str(hosted_memory))
+    try:
+        assert get_memory_dir() == hosted_memory
+        store = MemoryStore()
+        store.load_from_disk()
+        result = store.add("memory", "scope-local fact")
+    finally:
+        clear_session_vars(tokens)
+
+    assert result["success"] is True
+    assert (hosted_memory / "MEMORY.md").read_text(encoding="utf-8") == "scope-local fact"
+    assert not (hermes_home / "memories" / "MEMORY.md").exists()
+
+
+def test_hosted_memory_without_scope_root_fails_closed(monkeypatch):
+    from tools.memory_tool import get_memory_dir
+
+    monkeypatch.setenv("MOCHI_HOSTED_MODE", "true")
+    tokens = set_session_vars(platform="slack", hosted_memory_root="")
+    try:
+        try:
+            get_memory_dir()
+        except RuntimeError as exc:
+            assert "Hosted memory root is not set" in str(exc)
+        else:
+            raise AssertionError("hosted memory should not fall back to HERMES_HOME")
+    finally:
+        clear_session_vars(tokens)

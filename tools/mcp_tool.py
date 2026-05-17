@@ -2211,7 +2211,16 @@ class MCPAuthScopePool:
         self.name = name
         self.config = copy.deepcopy(config)
         self._servers: dict[str, MCPServerTask] = {}
+        self._server_assertions: dict[str, str] = {}
         self._lock = asyncio.Lock()
+
+    @staticmethod
+    def _current_scope_assertion() -> str:
+        try:
+            from gateway.session_context import get_session_env
+            return get_session_env("MOCHI_HOSTED_SCOPE_ASSERTION", "").strip()
+        except Exception:
+            return ""
 
     def _scoped_config(self, scope: str) -> dict:
         cfg = copy.deepcopy(self.config)
@@ -2231,13 +2240,9 @@ class MCPAuthScopePool:
                 or "chrome"
             ),
         })
-        try:
-            from gateway.session_context import get_session_env
-            assertion = get_session_env("MOCHI_HOSTED_SCOPE_ASSERTION", "").strip()
-            if assertion:
-                env["GROWTH_MCP_HOSTED_SCOPE_ASSERTION"] = assertion
-        except Exception:
-            pass
+        assertion = self._current_scope_assertion()
+        if assertion:
+            env["GROWTH_MCP_HOSTED_SCOPE_ASSERTION"] = assertion
         cfg["env"] = env
         return cfg
 
@@ -2250,12 +2255,16 @@ class MCPAuthScopePool:
         h = _scope_hash(scope)
         async with self._lock:
             existing = self._servers.get(scope)
-            if existing and existing.session:
+            assertion = self._current_scope_assertion()
+            if existing and existing.session and self._server_assertions.get(scope, "") == assertion:
                 return existing
+            if existing and existing.session:
+                await existing.shutdown()
             server = MCPServerTask(f"{self.name}@{h}")
             server._gateway_scoped_worker = True
             await server.start(self._scoped_config(scope))
             self._servers[scope] = server
+            self._server_assertions[scope] = assertion
             return server
 
 
