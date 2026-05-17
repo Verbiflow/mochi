@@ -791,7 +791,50 @@ class TestGrowthMcpGatewayConfigMigration:
         server = raw["mcp_servers"]["growth"]
         assert server["per_auth_scope"] is True
         assert server["gateway_browser_provider"] == "chrome"
-        assert "mcp_servers.*.per_auth_scope/gateway_browser_provider" in results["config_added"][0]
+        assert any(
+            "mcp_servers.*.per_auth_scope/gateway_browser_provider" in entry
+            for entry in results["config_added"]
+        )
+
+    def test_migration_repairs_current_version_missing_hosted_gateway_defaults(self, tmp_path):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "_config_version": DEFAULT_CONFIG["_config_version"],
+                    "model": "openai/gpt-4o-mini",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            results = migrate_config(interactive=False, quiet=True)
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+        assert raw["hosted_mode"] is True
+        assert raw["hosted_state_dir"] == str(tmp_path / "hosted")
+        assert any("hosted gateway defaults" in entry for entry in results["config_added"])
+
+    def test_migration_enforces_hosted_mode_for_hosted_only_gateway(self, tmp_path):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "_config_version": DEFAULT_CONFIG["_config_version"],
+                    "hosted_mode": False,
+                    "hosted_state_dir": str(tmp_path / "custom-hosted"),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            migrate_config(interactive=False, quiet=True)
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+        assert raw["hosted_mode"] is True
+        assert raw["hosted_state_dir"] == str(tmp_path / "custom-hosted")
 
     def test_migration_does_not_override_explicit_per_auth_scope_false(self, tmp_path):
         config_path = tmp_path / "config.yaml"
