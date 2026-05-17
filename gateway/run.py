@@ -1197,6 +1197,7 @@ class GatewayRunner:
     def __init__(self, config: Optional[GatewayConfig] = None):
         global _gateway_runner_ref
         self.config = config or load_gateway_config()
+        self._export_hosted_runtime_env()
         self.adapters: Dict[Platform, BasePlatformAdapter] = {}
         self._warn_if_docker_media_delivery_is_risky()
         _gateway_runner_ref = _weakref.ref(self)
@@ -1699,6 +1700,106 @@ class GatewayRunner:
             group_sessions_per_user=getattr(config, "group_sessions_per_user", True),
             thread_sessions_per_user=getattr(config, "thread_sessions_per_user", False),
         )
+
+    def _hosted_mode_enabled(self) -> bool:
+        config = getattr(self, "config", None)
+        if bool(getattr(config, "hosted_mode", False)):
+            return True
+        raw = os.getenv("MOCHI_HOSTED_MODE", "").strip().lower()
+        return raw in {"1", "true", "yes", "on"}
+
+    def _export_hosted_runtime_env(self) -> None:
+        config = getattr(self, "config", None)
+        if not bool(getattr(config, "hosted_mode", False)):
+            return
+        os.environ["MOCHI_HOSTED_MODE"] = "true"
+        configured = getattr(config, "hosted_state_dir", None)
+        if configured and not os.getenv("MOCHI_HOSTED_STATE_ROOT"):
+            os.environ["MOCHI_HOSTED_STATE_ROOT"] = str(Path(configured).expanduser())
+
+    def _hosted_state_root(self) -> Optional[Path]:
+        config = getattr(self, "config", None)
+        configured = getattr(config, "hosted_state_dir", None)
+        if configured:
+            return Path(configured)
+        raw = os.getenv("MOCHI_HOSTED_STATE_ROOT", "").strip()
+        return Path(raw).expanduser() if raw else None
+
+    def _with_hosted_context(self, event: MessageEvent) -> MessageEvent:
+        """Attach hosted scope metadata to a gateway event when hosted mode is on."""
+        if not self._hosted_mode_enabled() or event.source is None:
+            return event
+        from gateway.hosted import HostedScopeStore, resolve_hosted_context, source_with_hosted_context
+
+        context = resolve_hosted_context(event.source, state_root=self._hosted_state_root())
+        for path in (
+            context.state_root,
+            context.filesystem_root,
+            context.browser_profile_root,
+            context.growth_auth_root,
+            context.memory_root,
+            context.skills_root,
+            context.sessions_root,
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+        backend_scope = self._upsert_hosted_scope_via_bridge(context)
+        if backend_scope:
+            HostedScopeStore(self._hosted_state_root()).apply_backend_scope(event.source, backend_scope)
+            context = resolve_hosted_context(event.source, state_root=self._hosted_state_root())
+        source = source_with_hosted_context(event.source, context)
+        return dataclasses.replace(event, source=source)
+
+    def _upsert_hosted_scope_via_bridge(self, context: Any, *, issue_claim_assertion: bool = False) -> Optional[dict[str, Any]]:
+        base = os.getenv("MOCHI_BRIDGE_BASE_URL", "").strip().rstrip("/")
+        internal_token = (
+            os.getenv("MOCHI_BRIDGE_INTERNAL_TOKEN", "").strip()
+            or os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
+        )
+        if not base or not internal_token:
+            return None
+        try:
+            import urllib.request
+
+            payload = {
+                "hosted_scope_id": context.hosted_scope_id,
+                "scope_kind": context.scope_kind,
+                "platform": context.platform,
+                "platform_workspace_id": context.platform_workspace_id or None,
+                "platform_channel_id": context.platform_channel_id or None,
+                "platform_conversation_id": context.conversation_scope_id or None,
+                "issue_claim_assertion": issue_claim_assertion,
+                "metadata": {
+                    "conversation_scope_id": context.conversation_scope_id,
+                    "platform_thread_id": context.platform_thread_id,
+                    "platform_sender_hash": context.platform_sender_hash,
+                },
+            }
+            request = urllib.request.Request(
+                f"{base}/api/hosted-agent/scopes/resolve",
+                data=json.dumps(payload).encode("utf-8"),
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-internal-token": internal_token,
+                },
+            )
+            with urllib.request.urlopen(request, timeout=1.0) as response:
+                raw = response.read()
+            parsed = json.loads(raw.decode("utf-8")) if raw else {}
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            logger.warning("Bridge hosted scope upsert failed", exc_info=True)
+            return None
+
+    def _issue_hosted_scope_assertion_via_bridge(self, source: SessionSource) -> bool:
+        from gateway.hosted import HostedScopeStore, resolve_hosted_context
+
+        context = resolve_hosted_context(source, state_root=self._hosted_state_root())
+        backend_scope = self._upsert_hosted_scope_via_bridge(context, issue_claim_assertion=True)
+        if not backend_scope or not backend_scope.get("claim_assertion"):
+            return False
+        HostedScopeStore(self._hosted_state_root()).apply_backend_scope(source, backend_scope)
+        return True
 
     def _telegram_topic_mode_enabled(self, source: SessionSource) -> bool:
         """Return whether Telegram DM topic mode is active for this chat."""
@@ -5693,11 +5794,12 @@ class GatewayRunner:
         6. Run agent conversation
         7. Return response
         """
-        source = event.source
-
         # Internal events (e.g. background-process completion notifications)
         # are system-generated and must skip user authorization.
         is_internal = bool(getattr(event, "internal", False))
+        if not is_internal:
+            event = self._with_hosted_context(event)
+        source = event.source
 
         # Fire pre_gateway_dispatch plugin hook for user-originated messages.
         # Plugins receive the MessageEvent and may return a dict influencing flow:
@@ -6035,6 +6137,9 @@ class GatewayRunner:
                 )
                 logger.info("STOP for session %s — agent interrupted, session lock released", _quick_key)
                 return EphemeralReply(t("gateway.stop.stopped"))
+
+            if _cmd_def_inner and _cmd_def_inner.name == "auth":
+                return await self._handle_auth_command(event)
 
             # /reset and /new must bypass the running-agent guard so they
             # actually dispatch as commands instead of being queued as user
@@ -6443,6 +6548,9 @@ class GatewayRunner:
 
         if canonical == "whoami":
             return await self._handle_whoami_command(event)
+
+        if canonical == "auth":
+            return await self._handle_auth_command(event)
 
         if canonical == "status":
             return await self._handle_status_command(event)
@@ -6936,6 +7044,14 @@ class GatewayRunner:
                 from agent.model_metadata import get_model_context_length
 
                 _msg_cwd = os.environ.get("TERMINAL_CWD", os.path.expanduser("~"))
+                if source.hosted_scope_id:
+                    try:
+                        from gateway.hosted import resolve_hosted_context
+                        _hosted_ctx = resolve_hosted_context(source, state_root=self._hosted_state_root())
+                        _hosted_ctx.filesystem_root.mkdir(parents=True, exist_ok=True)
+                        _msg_cwd = str(_hosted_ctx.filesystem_root)
+                    except Exception:
+                        logger.warning("Failed to resolve hosted context reference root", exc_info=True)
                 _msg_runtime = _resolve_runtime_agent_kwargs()
                 _msg_config_ctx = None
                 try:
@@ -7894,6 +8010,19 @@ class GatewayRunner:
                 session_entry.session_key,
                 last_prompt_tokens=agent_result.get("last_prompt_tokens", 0),
             )
+            if source.hosted_scope_id:
+                try:
+                    from gateway.usage import record_hosted_usage_event
+                    record_hosted_usage_event(
+                        event=event,
+                        source=source,
+                        session_id=session_entry.session_id,
+                        session_key=session_entry.session_key,
+                        agent_result=agent_result,
+                        state_root=self._hosted_state_root(),
+                    )
+                except Exception:
+                    logger.warning("Hosted usage accounting failed", exc_info=True)
 
             # Auto voice reply: send TTS audio before the text response
             _already_sent = bool(agent_result.get("already_sent"))
@@ -8374,6 +8503,416 @@ class GatewayRunner:
             f"Tier: user\n"
             f"Slash commands you can run: {runnable_str}"
         )
+
+    def _auth_command_requires_admin(self, source: SessionSource, subcommand: str) -> bool:
+        if subcommand not in {"claim", "channel", "workspace", "use", "reset"}:
+            return False
+        chat_type = (source.chat_type or "").lower()
+        return chat_type not in {"dm", "direct", "private"}
+
+    def _auth_command_admin_denial(self, source: SessionSource, subcommand: str) -> Optional[str]:
+        if not self._auth_command_requires_admin(source, subcommand):
+            return None
+        from gateway.slash_access import policy_for_source as _policy_for_source
+
+        policy = _policy_for_source(self.config, source)
+        if policy.enabled and policy.is_admin(source.user_id):
+            return None
+        return f"⛔ /auth {subcommand} is admin-only in group and channel contexts."
+
+    def _auth_status_text(self, source: SessionSource) -> str:
+        mode = "hosted" if self._hosted_mode_enabled() else "local"
+        platform = source.platform.value if source.platform else "?"
+        sender = str(source.user_id or source.user_id_alt or "?")
+        hosted_scope = source.hosted_scope_id or "(not resolved)"
+        conversation_scope = source.conversation_scope_id or "(not resolved)"
+        override = "channel override" if source.hosted_using_channel_override else "workspace default"
+        selected = source.hosted_selected_org_slug or source.hosted_selected_org_id or "(none)"
+        claim = source.hosted_claim_status or "anonymous"
+        return "\n".join([
+            f"**Mochi auth** — {mode}",
+            f"Platform: `{platform}`",
+            f"Sender: `{sender}`",
+            f"Scope: `{hosted_scope}` ({source.hosted_scope_kind or 'workspace'})",
+            f"Conversation: `{conversation_scope}`",
+            f"Routing: {override}",
+            f"Claim: {claim}",
+            f"Selected workspace: `{selected}`",
+        ])
+
+    def _auth_usage_text(self) -> str:
+        return (
+            "Usage: /auth status | /auth channel | /auth workspace | "
+            "/auth claim [email] | /auth workspaces | /auth use <org-slug-or-id> | /auth reset"
+        )
+
+    @staticmethod
+    def _parse_growth_mcp_tool_result(raw: str) -> dict[str, Any]:
+        def _as_dict(value: Any) -> dict[str, Any]:
+            if isinstance(value, dict):
+                return value
+            if isinstance(value, str):
+                stripped = value.strip()
+                if not stripped:
+                    return {}
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    return {"message": stripped}
+                return parsed if isinstance(parsed, dict) else {"result": parsed}
+            return {}
+
+        outer = _as_dict(raw)
+        if "error" in outer:
+            return outer
+        structured = _as_dict(outer.get("structuredContent"))
+        if structured:
+            return structured
+        result = _as_dict(outer.get("result"))
+        return result or outer
+
+    def _dispatch_growth_mcp_auth_tool(self, tool_name: str, args: dict[str, Any]) -> Optional[dict[str, Any]]:
+        from tools.registry import registry
+
+        names = registry.get_all_tool_names()
+        preferred = f"mcp_growth_{tool_name}"
+        candidates = [preferred] if preferred in names else []
+        candidates.extend(
+            name
+            for name in names
+            if name.startswith("mcp_") and name.endswith(f"_{tool_name}") and name not in candidates
+        )
+        for candidate in candidates:
+            parsed = self._parse_growth_mcp_tool_result(registry.dispatch(candidate, args))
+            if "error" not in parsed:
+                return parsed
+            logger.warning("Growth MCP auth tool %s failed: %s", candidate, parsed.get("error"))
+        return None
+
+    def _claim_hosted_scope_via_growth_mcp(
+        self,
+        source: SessionSource,
+        *,
+        email: Optional[str],
+    ) -> Optional[dict[str, Any]]:
+        if email:
+            return self._run_growth_mcp_auth_tool_in_hosted_scope(
+                source,
+                "growth_claim_account",
+                {"email": email},
+            )
+        return self._run_growth_mcp_auth_tool_in_hosted_scope(
+            source,
+            "growth_claim_account_oauth",
+            {
+                "next_path": os.getenv("MOCHI_AUTH_CLAIM_NEXT_PATH", "/"),
+                "provider": os.getenv("MOCHI_AUTH_CLAIM_PROVIDER", "google"),
+            },
+        )
+
+    def _run_growth_mcp_auth_tool_in_hosted_scope(
+        self,
+        source: SessionSource,
+        tool_name: str,
+        args: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        if not source.hosted_scope_id:
+            return None
+        from gateway.hosted import resolve_hosted_context
+        from gateway.session_context import clear_session_vars, set_session_vars
+
+        context = resolve_hosted_context(source, state_root=self._hosted_state_root())
+        if tool_name in {"growth_claim_account", "growth_claim_account_oauth"} and not context.scope_assertion:
+            return None
+        for path in (context.growth_auth_root, context.browser_profile_root):
+            path.mkdir(parents=True, exist_ok=True)
+        tokens = set_session_vars(
+            platform=source.platform.value,
+            chat_id=source.chat_id,
+            chat_name=source.chat_name or "",
+            thread_id=str(source.thread_id) if source.thread_id else "",
+            user_id=str(source.user_id) if source.user_id else "",
+            user_name=str(source.user_name) if source.user_name else "",
+            guild_id=str(source.guild_id) if source.guild_id else "",
+            gateway_auth_scope=context.hosted_scope_id,
+            hosted_gateway_auth_root=str(context.growth_auth_root),
+            hosted_filesystem_root=str(context.filesystem_root),
+            hosted_scope_assertion=context.scope_assertion or "",
+        )
+        try:
+            return self._dispatch_growth_mcp_auth_tool(tool_name, args)
+        except Exception:
+            logger.warning("Growth MCP hosted auth tool failed", exc_info=True)
+            return None
+        finally:
+            clear_session_vars(tokens)
+
+    def _sync_hosted_claim_status(
+        self,
+        source: SessionSource,
+        *,
+        claim_token: str,
+    ) -> Optional[str]:
+        status_payload = self._run_growth_mcp_auth_tool_in_hosted_scope(
+            source,
+            "growth_check_claim_status",
+            {"claim_token": claim_token},
+        )
+        if not status_payload or status_payload.get("status") != "claimed":
+            return None
+        if status_payload.get("hosted_scope_claim_projected") is not True:
+            return None
+        if status_payload.get("hosted_scope_id") != source.hosted_scope_id:
+            return None
+        claimed_user_id = status_payload.get("claimed_user_id")
+        if not claimed_user_id:
+            return None
+        from gateway.hosted import HostedScopeStore
+
+        HostedScopeStore(self._hosted_state_root()).mark_claimed(
+            source,
+            claimed_user_id=str(claimed_user_id),
+            claim_token_id=claim_token,
+        )
+        return str(claimed_user_id)
+
+    def _select_hosted_workspace_via_growth_mcp(
+        self,
+        source: SessionSource,
+        *,
+        org_ref: str,
+    ) -> Optional[dict[str, Any]]:
+        return self._run_growth_mcp_auth_tool_in_hosted_scope(
+            source,
+            "growth_ensure_workspace",
+            {"workspace_id": org_ref},
+        )
+
+    def _persist_hosted_workspace_selection_via_bridge(
+        self,
+        source: SessionSource,
+        *,
+        org_ref: str,
+        org_slug: Optional[str],
+    ) -> Optional[dict[str, Any]]:
+        if not source.hosted_scope_id:
+            return None
+        base = os.getenv("MOCHI_BRIDGE_BASE_URL", "").strip().rstrip("/")
+        internal_token = (
+            os.getenv("MOCHI_BRIDGE_INTERNAL_TOKEN", "").strip()
+            or os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
+        )
+        if not base or not internal_token:
+            return None
+        try:
+            import urllib.request
+
+            payload = {"org_ref": org_ref, "org_slug": org_slug}
+            request = urllib.request.Request(
+                f"{base}/api/hosted-agent/scopes/{source.hosted_scope_id}/workspace",
+                data=json.dumps(payload).encode("utf-8"),
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-internal-token": internal_token,
+                },
+            )
+            with urllib.request.urlopen(request, timeout=2.0) as response:
+                raw = response.read()
+            parsed = json.loads(raw.decode("utf-8")) if raw else {}
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            logger.warning("Bridge hosted workspace selection failed", exc_info=True)
+            return None
+
+    def _reset_hosted_scope_via_bridge(self, source: SessionSource, *, new_hosted_scope_id: str) -> Optional[dict[str, Any]]:
+        if not source.hosted_scope_id:
+            return None
+        base = os.getenv("MOCHI_BRIDGE_BASE_URL", "").strip().rstrip("/")
+        internal_token = (
+            os.getenv("MOCHI_BRIDGE_INTERNAL_TOKEN", "").strip()
+            or os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
+        )
+        if not base or not internal_token:
+            return None
+        try:
+            import urllib.request
+
+            request = urllib.request.Request(
+                f"{base}/api/hosted-agent/scopes/{source.hosted_scope_id}/reset",
+                data=json.dumps({"new_hosted_scope_id": new_hosted_scope_id, "metadata": {}}).encode("utf-8"),
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-internal-token": internal_token,
+                },
+            )
+            with urllib.request.urlopen(request, timeout=2.0) as response:
+                raw = response.read()
+            parsed = json.loads(raw.decode("utf-8")) if raw else {}
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            logger.warning("Bridge hosted scope reset failed", exc_info=True)
+            return None
+
+    async def _handle_auth_command(self, event: MessageEvent) -> str:
+        """Handle hosted Mochi auth scope commands.
+
+        The local file-backed store is the gateway's fast projection. The
+        backend bridge owns durable claim completion and workspace auth when
+        available, but command routing must be resolved before the agent runs.
+        """
+        source = event.source
+        if source is None:
+            return "No message source is available for /auth."
+
+        if self._hosted_mode_enabled() and not source.hosted_scope_id:
+            event = self._with_hosted_context(event)
+            source = event.source
+
+        args = shlex.split(event.get_command_args() or "")
+        subcommand = (args[0].lower() if args else "status").strip()
+        if subcommand in {"help", "-h", "--help"}:
+            return self._auth_usage_text()
+        if subcommand not in {"status", "channel", "workspace", "claim", "workspaces", "use", "reset"}:
+            return f"Unknown /auth subcommand `{subcommand}`.\n{self._auth_usage_text()}"
+
+        if not self._hosted_mode_enabled():
+            return (
+                "Hosted auth is not enabled in this gateway process.\n"
+                "Set `hosted_mode: true` in gateway config or `MOCHI_HOSTED_MODE=true`."
+            )
+
+        denied = self._auth_command_admin_denial(source, subcommand)
+        if denied is not None:
+            return denied
+
+        from gateway.hosted import HostedScopeStore, resolve_hosted_context, source_with_hosted_context
+
+        store = HostedScopeStore(self._hosted_state_root())
+
+        if subcommand == "status":
+            context = resolve_hosted_context(source, state_root=self._hosted_state_root())
+            return self._auth_status_text(source_with_hosted_context(source, context))
+
+        if subcommand == "channel":
+            record = store.set_channel_override(source)
+            context = resolve_hosted_context(source, state_root=self._hosted_state_root())
+            backend_scope = self._upsert_hosted_scope_via_bridge(context)
+            if backend_scope:
+                record = store.apply_backend_scope(source, backend_scope)
+                context = resolve_hosted_context(source, state_root=self._hosted_state_root())
+            hosted_source = source_with_hosted_context(source, context)
+            return EphemeralReply(
+                "This conversation now uses a channel-specific hosted scope.\n"
+                f"Scope: `{record.hosted_scope_id}`\n"
+                f"Claim: {hosted_source.hosted_claim_status or 'anonymous'}\n"
+                "Use `/auth claim` to attach it to a Flage account."
+            )
+
+        if subcommand == "workspace":
+            if source.platform != Platform.SLACK:
+                context = resolve_hosted_context(source, state_root=self._hosted_state_root())
+                hosted_source = source_with_hosted_context(source, context)
+                return EphemeralReply(
+                    "This platform does not have a separate Slack-style workspace default.\n"
+                    f"Current scope: `{hosted_source.hosted_scope_id}`\n"
+                    "Use `/auth channel` for an explicit conversation scope."
+                )
+            store.clear_channel_override(source)
+            context = resolve_hosted_context(source, state_root=self._hosted_state_root())
+            hosted_source = source_with_hosted_context(source, context)
+            return EphemeralReply(
+                "This Slack channel now uses the workspace default hosted scope.\n"
+                f"Scope: `{hosted_source.hosted_scope_id}`"
+            )
+
+        if subcommand == "claim":
+            email = args[1].strip() if len(args) > 1 else None
+            if not self._issue_hosted_scope_assertion_via_bridge(source):
+                return EphemeralReply(
+                    "Hosted claim is unavailable because this gateway could not obtain a backend "
+                    "hosted-scope assertion. Check MOCHI_BRIDGE_BASE_URL and the internal token."
+                )
+            claim = self._claim_hosted_scope_via_growth_mcp(source, email=email)
+            token = None
+            if claim:
+                token = claim.get("claim_token") or claim.get("token")
+            if not token:
+                return EphemeralReply(
+                    "Hosted claim is unavailable because Growth MCP auth is not configured for this gateway scope. "
+                    "Ensure the Growth MCP server is installed with `per_auth_scope: true` and run `hermes config migrate`."
+                )
+            record = store.set_claim_token(source, str(token))
+            claim_url = claim.get("claim_url") or claim.get("url")
+            detail = "Magic-link claim started" if email else "Open this claim URL"
+            if claim_url:
+                return EphemeralReply(
+                    f"{detail} for hosted scope `{record.hosted_scope_id}`:\n{claim_url}"
+                )
+            message = str(claim.get("message") or detail)
+            return EphemeralReply(
+                f"{message}\nHosted scope: `{record.hosted_scope_id}`\nClaim token: `{token}`"
+            )
+
+        if subcommand == "workspaces":
+            context = resolve_hosted_context(source, state_root=self._hosted_state_root())
+            hosted_source = source_with_hosted_context(source, context)
+            if hosted_source.hosted_claim_status != "claimed":
+                record, _ = store.current_scope(source)
+                if record.claim_token_id:
+                    self._sync_hosted_claim_status(source, claim_token=record.claim_token_id)
+                    context = resolve_hosted_context(source, state_root=self._hosted_state_root())
+                    hosted_source = source_with_hosted_context(source, context)
+            if hosted_source.hosted_claim_status != "claimed":
+                return EphemeralReply("This hosted scope is anonymous. Use `/auth claim` first.")
+            selected = hosted_source.hosted_selected_org_slug or hosted_source.hosted_selected_org_id
+            if selected:
+                return EphemeralReply(f"Selected workspace: `{selected}`")
+            return EphemeralReply("No workspace is selected yet. Use `/auth use <org-slug-or-id>`.")
+
+        if subcommand == "use":
+            if len(args) < 2 or not args[1].strip():
+                return "Usage: /auth use <org-slug-or-id>"
+            org_ref = args[1].strip()
+            result = self._select_hosted_workspace_via_growth_mcp(source, org_ref=org_ref)
+            if not result:
+                return EphemeralReply(
+                    "Workspace selection is unavailable until this hosted scope is claimed and "
+                    "Growth MCP can verify the claimed user's workspace membership."
+                )
+            selected_ref = result.get("org_slug") or result.get("selected_org_slug") or result.get("selected_org_id") or org_ref
+            persisted = self._persist_hosted_workspace_selection_via_bridge(
+                source,
+                org_ref=org_ref,
+                org_slug=str(result.get("org_slug") or result.get("selected_org_slug") or "") or None,
+            )
+            if not persisted:
+                return EphemeralReply(
+                    "Growth MCP verified the workspace, but the backend could not persist the hosted "
+                    "scope selection. No local workspace selection was changed."
+                )
+            record = store.apply_backend_scope(source, persisted)
+            selected = record.selected_org_slug or record.selected_org_id or str(selected_ref)
+            return EphemeralReply(f"Selected workspace for `{record.hosted_scope_id}`: `{selected}`")
+
+        if subcommand == "reset":
+            from gateway.hosted import fresh_channel_scope_id
+
+            new_scope_id = fresh_channel_scope_id(source)
+            reset_payload = self._reset_hosted_scope_via_bridge(source, new_hosted_scope_id=new_scope_id)
+            if reset_payload:
+                fresh = store.apply_backend_scope(source, reset_payload)
+            else:
+                return EphemeralReply(
+                    "Hosted scope reset could not be persisted by the backend. No backend scope was changed."
+                )
+            return EphemeralReply(
+                "Created a fresh anonymous hosted scope for this conversation.\n"
+                f"Scope: `{fresh.hosted_scope_id}`"
+            )
+
+        return self._auth_usage_text()
 
 
     async def _handle_kanban_command(self, event: MessageEvent) -> str:
@@ -13062,7 +13601,31 @@ class GatewayRunner:
         """
         from gateway.session import resolve_gateway_auth_scope
         from gateway.session_context import set_session_vars
-        gateway_auth_scope = resolve_gateway_auth_scope(context.source) or ""
+        gateway_auth_scope = context.source.hosted_scope_id or resolve_gateway_auth_scope(context.source) or ""
+        hosted_gateway_auth_root = ""
+        if context.source.hosted_scope_id:
+            from gateway.hosted import default_hosted_state_root, resolve_hosted_context
+            hosted_scope_component = str(context.source.hosted_scope_id).replace("/", "_").replace("\\", "_").replace(":", "_")
+            conversation_component = str(context.source.conversation_scope_id or context.source.chat_id).replace("/", "_").replace("\\", "_").replace(":", "_")
+            hosted_context = resolve_hosted_context(context.source, state_root=self._hosted_state_root())
+            hosted_gateway_auth_root = str(
+                (self._hosted_state_root() or default_hosted_state_root())
+                / "state"
+                / hosted_scope_component
+                / "auth"
+            )
+            hosted_filesystem_root = str(
+                (self._hosted_state_root() or default_hosted_state_root())
+                / "state"
+                / hosted_scope_component
+                / "conversations"
+                / conversation_component
+                / "files"
+            )
+            hosted_scope_assertion = hosted_context.scope_assertion or ""
+        else:
+            hosted_filesystem_root = ""
+            hosted_scope_assertion = ""
         return set_session_vars(
             platform=context.source.platform.value,
             chat_id=context.source.chat_id,
@@ -13073,6 +13636,9 @@ class GatewayRunner:
             guild_id=str(context.source.guild_id) if context.source.guild_id else "",
             session_key=context.session_key,
             gateway_auth_scope=gateway_auth_scope,
+            hosted_gateway_auth_root=hosted_gateway_auth_root,
+            hosted_filesystem_root=hosted_filesystem_root,
+            hosted_scope_assertion=hosted_scope_assertion,
         )
 
     def _clear_session_env(self, tokens: list) -> None:

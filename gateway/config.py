@@ -462,6 +462,8 @@ class GatewayConfig:
     
     # Storage paths
     sessions_dir: Path = field(default_factory=lambda: get_hermes_home() / "sessions")
+    hosted_mode: bool = False
+    hosted_state_dir: Optional[Path] = None
     
     # Delivery settings
     always_log_local: bool = True  # Always save cron outputs to local files
@@ -572,6 +574,8 @@ class GatewayConfig:
             "reset_triggers": self.reset_triggers,
             "quick_commands": self.quick_commands,
             "sessions_dir": str(self.sessions_dir),
+            "hosted_mode": self.hosted_mode,
+            "hosted_state_dir": str(self.hosted_state_dir) if self.hosted_state_dir else None,
             "always_log_local": self.always_log_local,
             "stt_enabled": self.stt_enabled,
             "group_sessions_per_user": self.group_sessions_per_user,
@@ -610,6 +614,9 @@ class GatewayConfig:
         sessions_dir = get_hermes_home() / "sessions"
         if "sessions_dir" in data:
             sessions_dir = Path(data["sessions_dir"])
+        hosted_state_dir = None
+        if data.get("hosted_state_dir"):
+            hosted_state_dir = Path(str(data["hosted_state_dir"]))
         
         quick_commands = data.get("quick_commands", {})
         if not isinstance(quick_commands, dict):
@@ -640,6 +647,8 @@ class GatewayConfig:
             reset_triggers=data.get("reset_triggers", ["/new", "/reset"]),
             quick_commands=quick_commands,
             sessions_dir=sessions_dir,
+            hosted_mode=bool(data.get("hosted_mode", False)),
+            hosted_state_dir=hosted_state_dir,
             always_log_local=_coerce_bool(data.get("always_log_local"), True),
             stt_enabled=_coerce_bool(stt_enabled, True),
             group_sessions_per_user=_coerce_bool(group_sessions_per_user, True),
@@ -743,6 +752,12 @@ def load_gateway_config() -> GatewayConfig:
 
             if "always_log_local" in yaml_cfg:
                 gw_data["always_log_local"] = yaml_cfg["always_log_local"]
+
+            if "hosted_mode" in yaml_cfg:
+                gw_data["hosted_mode"] = yaml_cfg["hosted_mode"]
+
+            if "hosted_state_dir" in yaml_cfg:
+                gw_data["hosted_state_dir"] = yaml_cfg["hosted_state_dir"]
 
             if "unauthorized_dm_behavior" in yaml_cfg:
                 gw_data["unauthorized_dm_behavior"] = _normalize_unauthorized_dm_behavior(

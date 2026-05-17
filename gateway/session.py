@@ -124,6 +124,13 @@ class SessionSource:
     guild_id: Optional[str] = None  # Discord guild / Slack workspace / Matrix server scope
     parent_chat_id: Optional[str] = None  # Parent channel when chat_id refers to a thread
     message_id: Optional[str] = None  # ID of the triggering message (for pin/reply/react)
+    hosted_scope_id: Optional[str] = None
+    conversation_scope_id: Optional[str] = None
+    hosted_scope_kind: Optional[str] = None
+    hosted_claim_status: Optional[str] = None
+    hosted_selected_org_id: Optional[str] = None
+    hosted_selected_org_slug: Optional[str] = None
+    hosted_using_channel_override: bool = False
     
     @property
     def description(self) -> str:
@@ -167,6 +174,20 @@ class SessionSource:
             d["parent_chat_id"] = self.parent_chat_id
         if self.message_id:
             d["message_id"] = self.message_id
+        if self.hosted_scope_id:
+            d["hosted_scope_id"] = self.hosted_scope_id
+        if self.conversation_scope_id:
+            d["conversation_scope_id"] = self.conversation_scope_id
+        if self.hosted_scope_kind:
+            d["hosted_scope_kind"] = self.hosted_scope_kind
+        if self.hosted_claim_status:
+            d["hosted_claim_status"] = self.hosted_claim_status
+        if self.hosted_selected_org_id:
+            d["hosted_selected_org_id"] = self.hosted_selected_org_id
+        if self.hosted_selected_org_slug:
+            d["hosted_selected_org_slug"] = self.hosted_selected_org_slug
+        if self.hosted_using_channel_override:
+            d["hosted_using_channel_override"] = True
         return d
 
     @classmethod
@@ -185,6 +206,13 @@ class SessionSource:
             guild_id=data.get("guild_id"),
             parent_chat_id=data.get("parent_chat_id"),
             message_id=data.get("message_id"),
+            hosted_scope_id=data.get("hosted_scope_id"),
+            conversation_scope_id=data.get("conversation_scope_id"),
+            hosted_scope_kind=data.get("hosted_scope_kind"),
+            hosted_claim_status=data.get("hosted_claim_status"),
+            hosted_selected_org_id=data.get("hosted_selected_org_id"),
+            hosted_selected_org_slug=data.get("hosted_selected_org_slug"),
+            hosted_using_channel_override=bool(data.get("hosted_using_channel_override", False)),
         )
 
 
@@ -695,6 +723,16 @@ def build_session_key(
       - Without identifiers, messages fall back to one session per platform/chat_type.
     """
     platform = source.platform.value
+    if source.hosted_scope_id:
+        key_parts = ["agent:hosted", str(source.hosted_scope_id)]
+        if source.conversation_scope_id:
+            key_parts.append(str(source.conversation_scope_id))
+        elif source.chat_id:
+            key_parts.append(str(source.chat_id))
+        if source.thread_id:
+            key_parts.append(str(source.thread_id))
+        return ":".join(key_parts)
+
     if source.chat_type == "dm":
         dm_chat_id = source.chat_id
         if source.platform == Platform.WHATSAPP:

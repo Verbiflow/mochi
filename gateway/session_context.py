@@ -58,6 +58,9 @@ _SESSION_GUILD_ID: ContextVar = ContextVar("HERMES_SESSION_GUILD_ID", default=_U
 _SESSION_KEY: ContextVar = ContextVar("HERMES_SESSION_KEY", default=_UNSET)
 _SESSION_ID: ContextVar = ContextVar("HERMES_SESSION_ID", default=_UNSET)
 _GATEWAY_AUTH_SCOPE: ContextVar = ContextVar("HERMES_GATEWAY_AUTH_SCOPE", default=_UNSET)
+_HOSTED_GATEWAY_AUTH_ROOT: ContextVar = ContextVar("MOCHI_HOSTED_GATEWAY_AUTH_ROOT", default=_UNSET)
+_HOSTED_FILESYSTEM_ROOT: ContextVar = ContextVar("MOCHI_HOSTED_FILESYSTEM_ROOT", default=_UNSET)
+_HOSTED_SCOPE_ASSERTION: ContextVar = ContextVar("MOCHI_HOSTED_SCOPE_ASSERTION", default=_UNSET)
 
 # Cron auto-delivery vars — set per-job in run_job() so concurrent jobs
 # don't clobber each other's delivery targets.
@@ -76,6 +79,9 @@ _VAR_MAP = {
     "HERMES_SESSION_KEY": _SESSION_KEY,
     "HERMES_SESSION_ID": _SESSION_ID,
     "HERMES_GATEWAY_AUTH_SCOPE": _GATEWAY_AUTH_SCOPE,
+    "MOCHI_HOSTED_GATEWAY_AUTH_ROOT": _HOSTED_GATEWAY_AUTH_ROOT,
+    "MOCHI_HOSTED_FILESYSTEM_ROOT": _HOSTED_FILESYSTEM_ROOT,
+    "MOCHI_HOSTED_SCOPE_ASSERTION": _HOSTED_SCOPE_ASSERTION,
     "HERMES_CRON_AUTO_DELIVER_PLATFORM": _CRON_AUTO_DELIVER_PLATFORM,
     "HERMES_CRON_AUTO_DELIVER_CHAT_ID": _CRON_AUTO_DELIVER_CHAT_ID,
     "HERMES_CRON_AUTO_DELIVER_THREAD_ID": _CRON_AUTO_DELIVER_THREAD_ID,
@@ -92,6 +98,9 @@ def set_session_vars(
     guild_id: str = "",
     session_key: str = "",
     gateway_auth_scope: str = "",
+    hosted_gateway_auth_root: str = "",
+    hosted_filesystem_root: str = "",
+    hosted_scope_assertion: str = "",
 ) -> list:
     """Set all session context variables and return reset tokens.
 
@@ -111,6 +120,9 @@ def set_session_vars(
         _SESSION_GUILD_ID.set(guild_id),
         _SESSION_KEY.set(session_key),
         _GATEWAY_AUTH_SCOPE.set(gateway_auth_scope),
+        _HOSTED_GATEWAY_AUTH_ROOT.set(hosted_gateway_auth_root),
+        _HOSTED_FILESYSTEM_ROOT.set(hosted_filesystem_root),
+        _HOSTED_SCOPE_ASSERTION.set(hosted_scope_assertion),
     ]
     return tokens
 
@@ -136,6 +148,9 @@ def clear_session_vars(tokens: list) -> None:
         _SESSION_GUILD_ID,
         _SESSION_KEY,
         _GATEWAY_AUTH_SCOPE,
+        _HOSTED_GATEWAY_AUTH_ROOT,
+        _HOSTED_FILESYSTEM_ROOT,
+        _HOSTED_SCOPE_ASSERTION,
     ):
         var.set("")
 
