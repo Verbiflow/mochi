@@ -1429,6 +1429,14 @@ The user has requested that this compaction PRIORITISE preserving all informatio
             return messages
 
         turns_to_summarize = messages[compress_start:compress_end]
+        if not self._previous_summary:
+            _, persisted_summary_body = self._find_latest_context_summary(
+                messages,
+                0,
+                len(messages),
+            )
+            if persisted_summary_body:
+                self._previous_summary = persisted_summary_body
         summary_idx, summary_body = self._find_latest_context_summary(
             messages,
             compress_start,
