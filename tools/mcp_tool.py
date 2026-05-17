@@ -2178,6 +2178,29 @@ def _scope_hash(scope: str) -> str:
 
 
 def _gateway_auth_root() -> Path:
+    try:
+        from gateway.session_context import get_session_env
+        scoped_root = get_session_env("MOCHI_HOSTED_GATEWAY_AUTH_ROOT", "").strip()
+        if scoped_root:
+            return Path(scoped_root).expanduser()
+    except Exception:
+        pass
+    hosted_root = os.getenv("MOCHI_HOSTED_GATEWAY_AUTH_ROOT", "").strip()
+    if hosted_root:
+        return Path(hosted_root).expanduser()
+    hosted_mode = os.getenv("MOCHI_HOSTED_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+    gateway_mode = os.getenv("_HERMES_GATEWAY") == "1"
+    if hosted_mode or gateway_mode:
+        hosted_state_root = os.getenv("MOCHI_HOSTED_STATE_ROOT", "").strip()
+        if hosted_state_root:
+            return Path(hosted_state_root).expanduser() / "bootstrap" / "auth"
+        hermes_home = os.getenv("HERMES_HOME", "").strip()
+        if hermes_home:
+            return Path(hermes_home).expanduser() / "hosted" / "bootstrap" / "auth"
+        raise RuntimeError(
+            "Hosted Mochi requires MOCHI_HOSTED_GATEWAY_AUTH_ROOT, "
+            "MOCHI_HOSTED_STATE_ROOT, or HERMES_HOME for Growth MCP auth."
+        )
     return Path.home() / ".flage" / "gateway-auth"
 
 
@@ -2208,6 +2231,13 @@ class MCPAuthScopePool:
                 or "chrome"
             ),
         })
+        try:
+            from gateway.session_context import get_session_env
+            assertion = get_session_env("MOCHI_HOSTED_SCOPE_ASSERTION", "").strip()
+            if assertion:
+                env["GROWTH_MCP_HOSTED_SCOPE_ASSERTION"] = assertion
+        except Exception:
+            pass
         cfg["env"] = env
         return cfg
 
@@ -2959,9 +2989,9 @@ def _should_use_per_auth_scope(name: str, config: dict) -> bool:
 def _assert_gateway_growth_mcp_is_explicitly_scoped(name: str, config: dict) -> None:
     if os.getenv("_HERMES_GATEWAY") != "1":
         return
-    if "per_auth_scope" in config:
-        return
     if not _is_growth_mcp_gateway_candidate(name, config):
+        return
+    if _should_use_per_auth_scope(name, config):
         return
     raise ValueError(
         f"MCP server '{name}' looks like Growth MCP but is missing "

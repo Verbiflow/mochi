@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from tools.binary_extensions import BINARY_EXTENSIONS
-from tools.path_security import gateway_auth_path_error
+from tools.path_security import gateway_auth_path_error, hosted_filesystem_path_error
 
 from agent.file_safety import (
     build_write_denied_paths,
@@ -88,7 +88,11 @@ def _get_safe_write_root() -> Optional[str]:
 
 def _is_write_denied(path: str) -> bool:
     """Return True if path is on the write deny list."""
-    return bool(gateway_auth_path_error(path)) or _shared_is_write_denied(path)
+    return (
+        bool(gateway_auth_path_error(path))
+        or bool(hosted_filesystem_path_error(path))
+        or _shared_is_write_denied(path)
+    )
 
 
 # =============================================================================
@@ -692,6 +696,8 @@ class ShellFileOperations(FileOperations):
         path = self._expand_path(path)
         if err := gateway_auth_path_error(path):
             return ReadResult(error=err)
+        if err := hosted_filesystem_path_error(path):
+            return ReadResult(error=err)
         
         offset, limit = normalize_read_pagination(offset, limit)
         
@@ -831,6 +837,8 @@ class ShellFileOperations(FileOperations):
         path = self._expand_path(path)
         if err := gateway_auth_path_error(path):
             return ReadResult(error=err)
+        if err := hosted_filesystem_path_error(path):
+            return ReadResult(error=err)
         stat_cmd = f"wc -c < {self._escape_shell_arg(path)} 2>/dev/null"
         stat_result = self._exec(stat_cmd)
         if stat_result.exit_code != 0:
@@ -910,7 +918,9 @@ class ShellFileOperations(FileOperations):
         # Expand ~ and other shell paths
         path = self._expand_path(path)
         if err := gateway_auth_path_error(path):
-            return SearchResult(error=err, total_count=0)
+            return WriteResult(error=err)
+        if err := hosted_filesystem_path_error(path):
+            return WriteResult(error=err)
 
         # Block writes to sensitive paths
         if _is_write_denied(path):
@@ -1393,6 +1403,8 @@ class ShellFileOperations(FileOperations):
 
         # Expand ~ and other shell paths
         path = self._expand_path(path)
+        if err := hosted_filesystem_path_error(path):
+            return SearchResult(error=err, total_count=0)
         
         # Validate that the path exists before searching
         check = self._exec(f"test -e {self._escape_shell_arg(path)} && echo exists || echo not_found")

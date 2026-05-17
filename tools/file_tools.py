@@ -15,7 +15,7 @@ from tools.file_operations import (
     normalize_read_pagination,
     normalize_search_pagination,
 )
-from tools.path_security import gateway_auth_path_error
+from tools.path_security import gateway_auth_path_error, hosted_filesystem_path_error
 from tools import file_state
 from agent.redact import redact_sensitive_text
 
@@ -464,6 +464,8 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
         _resolved = _resolve_path_for_task(path, task_id)
         if err := gateway_auth_path_error(_resolved):
             return json.dumps({"error": err}, ensure_ascii=False)
+        if err := hosted_filesystem_path_error(_resolved):
+            return json.dumps({"error": err}, ensure_ascii=False)
 
         # ── Binary file guard ─────────────────────────────────────────
         # Block binary files by extension (no I/O).
@@ -798,6 +800,11 @@ def _check_file_staleness(filepath: str, task_id: str) -> str | None:
 
 def write_file_tool(path: str, content: str, task_id: str = "default") -> str:
     """Write content to a file."""
+    try:
+        if err := hosted_filesystem_path_error(_resolve_path_for_task(path, task_id)):
+            return tool_error(err)
+    except Exception:
+        pass
     sensitive_err = _check_sensitive_path(path, task_id)
     if sensitive_err:
         return tool_error(sensitive_err)

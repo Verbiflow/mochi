@@ -1025,11 +1025,23 @@ def _get_env_config() -> Dict[str, Any]:
     else:
         default_cwd = "/root"
 
+    hosted_filesystem_root = ""
+    if env_type == "local":
+        try:
+            from gateway.session_context import get_session_env
+            hosted_filesystem_root = get_session_env("MOCHI_HOSTED_FILESYSTEM_ROOT", "").strip()
+        except Exception:
+            hosted_filesystem_root = ""
+        hosted_filesystem_root = hosted_filesystem_root or os.getenv("MOCHI_HOSTED_FILESYSTEM_ROOT", "").strip()
+        if hosted_filesystem_root:
+            default_cwd = os.path.abspath(os.path.expanduser(hosted_filesystem_root))
+            os.makedirs(default_cwd, exist_ok=True)
+
     # Read TERMINAL_CWD but sanity-check it for container backends.
     # If Docker cwd passthrough is explicitly enabled, remap the host path to
     # /workspace and track the original host path separately. Otherwise keep the
     # normal sandbox behavior and discard host paths.
-    cwd = os.getenv("TERMINAL_CWD", default_cwd)
+    cwd = default_cwd if hosted_filesystem_root else os.getenv("TERMINAL_CWD", default_cwd)
     if cwd:
         cwd = os.path.expanduser(cwd)
     host_cwd = None
@@ -1064,6 +1076,7 @@ def _get_env_config() -> Dict[str, Any]:
         "vercel_runtime": os.getenv("TERMINAL_VERCEL_RUNTIME", "").strip(),
         "cwd": cwd,
         "host_cwd": host_cwd,
+        "hosted_filesystem_root": hosted_filesystem_root,
         "docker_mount_cwd_to_workspace": mount_docker_cwd,
         "timeout": _parse_env_var("TERMINAL_TIMEOUT", "180"),
         "lifetime_seconds": _parse_env_var("TERMINAL_LIFETIME_SECONDS", "300"),
@@ -1728,6 +1741,17 @@ def terminal_tool(
         # Get configuration
         config = _get_env_config()
         env_type = config["env_type"]
+        if os.getenv("MOCHI_HOSTED_MODE", "").strip().lower() in {"1", "true", "yes", "on"} and env_type == "local":
+            return json.dumps({
+                "output": "",
+                "exit_code": -1,
+                "error": (
+                    "Local terminal is disabled in hosted mode. Configure a "
+                    "sandbox terminal backend that mounts only the hosted "
+                    "filesystem root before enabling terminal access."
+                ),
+                "status": "blocked",
+            }, ensure_ascii=False)
 
         # Use task_id for environment isolation. By default all subagent
         # task_ids collapse back to "default" so the top-level agent and
@@ -1921,6 +1945,22 @@ def terminal_tool(
                     "status": "blocked"
                 }, ensure_ascii=False)
 
+        effective_cwd = workdir or cwd
+        if workdir and not os.path.isabs(workdir):
+            effective_cwd = os.path.abspath(os.path.join(cwd, workdir))
+        try:
+            from tools.path_security import hosted_filesystem_path_error
+            hosted_cwd_error = hosted_filesystem_path_error(effective_cwd)
+        except Exception:
+            hosted_cwd_error = None
+        if hosted_cwd_error:
+            return json.dumps({
+                "output": "",
+                "exit_code": -1,
+                "error": hosted_cwd_error,
+                "status": "blocked"
+            }, ensure_ascii=False)
+
         # Prepare command for execution
         pty_disabled_reason = None
         effective_pty = pty
@@ -1941,7 +1981,6 @@ def terminal_tool(
             from tools.process_registry import process_registry
 
             session_key = get_current_session_key(default="")
-            effective_cwd = workdir or cwd
             try:
                 if env_type == "local":
                     proc_session = process_registry.spawn_local(
@@ -2050,7 +2089,7 @@ def terminal_tool(
                 try:
                     execute_kwargs = {
                         "timeout": effective_timeout,
-                        "cwd": workdir or cwd,
+                        "cwd": effective_cwd,
                     }
                     result = env.execute(command, **execute_kwargs)
                 except Exception as e:

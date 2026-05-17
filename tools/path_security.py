@@ -53,9 +53,24 @@ def is_gateway_auth_path(path: str | Path) -> bool:
     """
     try:
         resolved = Path(os.path.expanduser(str(path))).resolve()
-        root = (Path.home() / ".flage" / "gateway-auth").resolve()
-        resolved.relative_to(root)
-        return True
+        roots = [Path.home() / ".flage" / "gateway-auth"]
+        try:
+            from gateway.session_context import get_session_env
+            scoped_root = get_session_env("MOCHI_HOSTED_GATEWAY_AUTH_ROOT", "").strip()
+            if scoped_root:
+                roots.append(Path(scoped_root).expanduser())
+        except Exception:
+            pass
+        hosted_root = os.getenv("MOCHI_HOSTED_GATEWAY_AUTH_ROOT", "").strip()
+        if hosted_root:
+            roots.append(Path(hosted_root).expanduser())
+        for root_candidate in roots:
+            try:
+                resolved.relative_to(root_candidate.resolve())
+                return True
+            except (ValueError, OSError):
+                continue
+        return False
     except (ValueError, OSError):
         return False
 
@@ -67,3 +82,35 @@ def gateway_auth_path_error(path: str | Path) -> str | None:
             "contains scoped gateway auth and browser session state."
         )
     return None
+
+
+def hosted_filesystem_root() -> Path | None:
+    try:
+        from gateway.session_context import get_session_env
+        raw = get_session_env("MOCHI_HOSTED_FILESYSTEM_ROOT", "").strip()
+    except Exception:
+        raw = ""
+    if not raw:
+        raw = os.getenv("MOCHI_HOSTED_FILESYSTEM_ROOT", "").strip()
+    if not raw:
+        return None
+    return Path(raw).expanduser()
+
+
+def hosted_mode_enabled() -> bool:
+    raw = os.getenv("MOCHI_HOSTED_MODE", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def hosted_filesystem_path_error(path: str | Path) -> str | None:
+    root = hosted_filesystem_root()
+    if root is None:
+        if hosted_mode_enabled():
+            return "Access denied: hosted filesystem root is not set for this hosted session."
+        return None
+    try:
+        resolved = Path(os.path.expanduser(str(path))).resolve()
+        resolved.relative_to(root.resolve())
+        return None
+    except (ValueError, OSError) as exc:
+        return f"Access denied: {path} escapes hosted filesystem root {root}: {exc}"
