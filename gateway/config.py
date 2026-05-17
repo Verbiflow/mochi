@@ -127,6 +127,7 @@ class Platform(Enum):
     BLUEBUBBLES = "bluebubbles"
     QQBOT = "qqbot"
     YUANBAO = "yuanbao"
+    GOOGLE_CHAT = "google_chat"
     @classmethod
     def _missing_(cls, value):
         """Accept unknown platform names only for known plugin adapters.
@@ -154,6 +155,7 @@ class Platform(Enum):
             pseudo._name_ = value.upper().replace("-", "_").replace(" ", "_")
             cls._value2member_map_[value] = pseudo
             cls._member_map_[pseudo._name_] = pseudo
+            type.__setattr__(cls, pseudo._name_, pseudo)
             return pseudo
 
         # Runtime-registered plugins (e.g. user-installed, discovered after
@@ -166,6 +168,7 @@ class Platform(Enum):
                 pseudo._name_ = value.upper().replace("-", "_").replace(" ", "_")
                 cls._value2member_map_[value] = pseudo
                 cls._member_map_[pseudo._name_] = pseudo
+                type.__setattr__(cls, pseudo._name_, pseudo)
                 return pseudo
         except Exception:
             pass
@@ -435,6 +438,9 @@ _PLATFORM_CONNECTED_CHECKERS: dict[Platform, Callable[[PlatformConfig], bool]] =
     Platform.DINGTALK: lambda cfg: bool(
         (cfg.extra.get("client_id") or os.getenv("DINGTALK_CLIENT_ID"))
         and (cfg.extra.get("client_secret") or os.getenv("DINGTALK_CLIENT_SECRET"))
+    ),
+    Platform.GOOGLE_CHAT: lambda cfg: bool(
+        cfg.extra.get("project_id") and cfg.extra.get("subscription_name")
     ),
 }
 

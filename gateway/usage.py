@@ -15,20 +15,13 @@ import urllib.request
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .hosted import default_hosted_state_root
 from .platforms.base import MessageEvent
 from .session import SessionSource, _hash_sender_id
 
 logger = logging.getLogger(__name__)
-
-
-def _safe_uuid_or_none(value: Optional[str]) -> Optional[str]:
-    if not value:
-        return None
-    text = str(value).strip()
-    return text if "-" in text else None
 
 
 def _event_text_hash(event: MessageEvent) -> str:
@@ -60,8 +53,6 @@ def build_hosted_usage_event(
     occurred_at = datetime.now(timezone.utc).isoformat()
     return {
         "idempotency_key": idempotency_key,
-        "org_id": _safe_uuid_or_none(source.hosted_selected_org_id),
-        "workspace_id": _safe_uuid_or_none(source.hosted_selected_org_id),
         "hosted_scope_id": source.hosted_scope_id,
         "conversation_scope_id": source.conversation_scope_id,
         "session_id": session_id,

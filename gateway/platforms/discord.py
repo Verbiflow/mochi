@@ -141,7 +141,13 @@ def _build_allowed_mentions():
             return default
         return raw in {"true", "1", "yes", "on"}
 
-    return discord.AllowedMentions(
+    # Some tests and optional-platform imports install lightweight discord
+    # stubs after this module is imported. Resolve the module at call time so
+    # the helper never closes over a stale MagicMock module.
+    import sys as _sys
+    _discord = _sys.modules.get("discord") or discord
+
+    return _discord.AllowedMentions(
         everyone=_b("DISCORD_ALLOW_MENTION_EVERYONE", False),
         roles=_b("DISCORD_ALLOW_MENTION_ROLES", False),
         users=_b("DISCORD_ALLOW_MENTION_USERS", True),

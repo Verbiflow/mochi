@@ -1703,24 +1703,27 @@ class GatewayRunner:
 
     def _hosted_mode_enabled(self) -> bool:
         config = getattr(self, "config", None)
-        if bool(getattr(config, "hosted_mode", False)):
+        configured = getattr(config, "hosted_mode", False)
+        if configured is True:
+            return True
+        if isinstance(configured, str) and configured.strip().lower() in {"1", "true", "yes", "on"}:
             return True
         raw = os.getenv("MOCHI_HOSTED_MODE", "").strip().lower()
         return raw in {"1", "true", "yes", "on"}
 
     def _export_hosted_runtime_env(self) -> None:
         config = getattr(self, "config", None)
-        if not bool(getattr(config, "hosted_mode", False)):
+        if not self._hosted_mode_enabled():
             return
         os.environ["MOCHI_HOSTED_MODE"] = "true"
         configured = getattr(config, "hosted_state_dir", None)
-        if configured and not os.getenv("MOCHI_HOSTED_STATE_ROOT"):
+        if isinstance(configured, (str, os.PathLike)) and not os.getenv("MOCHI_HOSTED_STATE_ROOT"):
             os.environ["MOCHI_HOSTED_STATE_ROOT"] = str(Path(configured).expanduser())
 
     def _hosted_state_root(self) -> Optional[Path]:
         config = getattr(self, "config", None)
         configured = getattr(config, "hosted_state_dir", None)
-        if configured:
+        if isinstance(configured, (str, os.PathLike)):
             return Path(configured)
         raw = os.getenv("MOCHI_HOSTED_STATE_ROOT", "").strip()
         return Path(raw).expanduser() if raw else None
@@ -1743,9 +1746,13 @@ class GatewayRunner:
         ):
             path.mkdir(parents=True, exist_ok=True)
         backend_scope = self._upsert_hosted_scope_via_bridge(context)
-        if backend_scope:
-            HostedScopeStore(self._hosted_state_root()).apply_backend_scope(event.source, backend_scope)
-            context = resolve_hosted_context(event.source, state_root=self._hosted_state_root())
+        if not backend_scope:
+            raise RuntimeError(
+                "Hosted Mochi could not resolve scope with the bridge. "
+                "Check MOCHI_BRIDGE_BASE_URL and MOCHI_BRIDGE_INTERNAL_TOKEN."
+            )
+        HostedScopeStore(self._hosted_state_root()).apply_backend_scope(event.source, backend_scope)
+        context = resolve_hosted_context(event.source, state_root=self._hosted_state_root())
         source = source_with_hosted_context(event.source, context)
         return dataclasses.replace(event, source=source)
 
@@ -5800,6 +5807,9 @@ class GatewayRunner:
         if not is_internal:
             event = self._with_hosted_context(event)
         source = event.source
+        if source is None:
+            logger.debug("Ignoring message with no source")
+            return None
 
         # Fire pre_gateway_dispatch plugin hook for user-originated messages.
         # Plugins receive the MessageEvent and may return a dict influencing flow:
@@ -8637,6 +8647,8 @@ class GatewayRunner:
             gateway_auth_scope=context.hosted_scope_id,
             hosted_gateway_auth_root=str(context.growth_auth_root),
             hosted_filesystem_root=str(context.filesystem_root),
+            hosted_memory_root=str(context.memory_root),
+            hosted_browser_profile_root=str(context.browser_profile_root),
             hosted_scope_assertion=context.scope_assertion or "",
         )
         try:
@@ -8769,6 +8781,8 @@ class GatewayRunner:
         if self._hosted_mode_enabled() and not source.hosted_scope_id:
             event = self._with_hosted_context(event)
             source = event.source
+            if source is None:
+                return "No message source is available for /auth."
 
         args = shlex.split(event.get_command_args() or "")
         subcommand = (args[0].lower() if args else "status").strip()
@@ -8802,6 +8816,11 @@ class GatewayRunner:
             if backend_scope:
                 record = store.apply_backend_scope(source, backend_scope)
                 context = resolve_hosted_context(source, state_root=self._hosted_state_root())
+            else:
+                store.clear_channel_override(source)
+                return EphemeralReply(
+                    "Hosted channel scope could not be persisted by the backend. No local override was kept."
+                )
             hosted_source = source_with_hosted_context(source, context)
             return EphemeralReply(
                 "This conversation now uses a channel-specific hosted scope.\n"
@@ -13603,29 +13622,18 @@ class GatewayRunner:
         from gateway.session_context import set_session_vars
         gateway_auth_scope = context.source.hosted_scope_id or resolve_gateway_auth_scope(context.source) or ""
         hosted_gateway_auth_root = ""
+        hosted_filesystem_root = ""
+        hosted_memory_root = ""
+        hosted_browser_profile_root = ""
+        hosted_scope_assertion = ""
         if context.source.hosted_scope_id:
-            from gateway.hosted import default_hosted_state_root, resolve_hosted_context
-            hosted_scope_component = str(context.source.hosted_scope_id).replace("/", "_").replace("\\", "_").replace(":", "_")
-            conversation_component = str(context.source.conversation_scope_id or context.source.chat_id).replace("/", "_").replace("\\", "_").replace(":", "_")
+            from gateway.hosted import resolve_hosted_context
             hosted_context = resolve_hosted_context(context.source, state_root=self._hosted_state_root())
-            hosted_gateway_auth_root = str(
-                (self._hosted_state_root() or default_hosted_state_root())
-                / "state"
-                / hosted_scope_component
-                / "auth"
-            )
-            hosted_filesystem_root = str(
-                (self._hosted_state_root() or default_hosted_state_root())
-                / "state"
-                / hosted_scope_component
-                / "conversations"
-                / conversation_component
-                / "files"
-            )
+            hosted_gateway_auth_root = str(hosted_context.growth_auth_root)
+            hosted_filesystem_root = str(hosted_context.filesystem_root)
+            hosted_memory_root = str(hosted_context.memory_root)
+            hosted_browser_profile_root = str(hosted_context.browser_profile_root)
             hosted_scope_assertion = hosted_context.scope_assertion or ""
-        else:
-            hosted_filesystem_root = ""
-            hosted_scope_assertion = ""
         return set_session_vars(
             platform=context.source.platform.value,
             chat_id=context.source.chat_id,
@@ -13638,6 +13646,8 @@ class GatewayRunner:
             gateway_auth_scope=gateway_auth_scope,
             hosted_gateway_auth_root=hosted_gateway_auth_root,
             hosted_filesystem_root=hosted_filesystem_root,
+            hosted_memory_root=hosted_memory_root,
+            hosted_browser_profile_root=hosted_browser_profile_root,
             hosted_scope_assertion=hosted_scope_assertion,
         )
 

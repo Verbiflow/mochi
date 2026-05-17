@@ -60,6 +60,8 @@ _SESSION_ID: ContextVar = ContextVar("HERMES_SESSION_ID", default=_UNSET)
 _GATEWAY_AUTH_SCOPE: ContextVar = ContextVar("HERMES_GATEWAY_AUTH_SCOPE", default=_UNSET)
 _HOSTED_GATEWAY_AUTH_ROOT: ContextVar = ContextVar("MOCHI_HOSTED_GATEWAY_AUTH_ROOT", default=_UNSET)
 _HOSTED_FILESYSTEM_ROOT: ContextVar = ContextVar("MOCHI_HOSTED_FILESYSTEM_ROOT", default=_UNSET)
+_HOSTED_MEMORY_ROOT: ContextVar = ContextVar("MOCHI_HOSTED_MEMORY_ROOT", default=_UNSET)
+_HOSTED_BROWSER_PROFILE_ROOT: ContextVar = ContextVar("MOCHI_HOSTED_BROWSER_PROFILE_ROOT", default=_UNSET)
 _HOSTED_SCOPE_ASSERTION: ContextVar = ContextVar("MOCHI_HOSTED_SCOPE_ASSERTION", default=_UNSET)
 
 # Cron auto-delivery vars — set per-job in run_job() so concurrent jobs
@@ -81,6 +83,8 @@ _VAR_MAP = {
     "HERMES_GATEWAY_AUTH_SCOPE": _GATEWAY_AUTH_SCOPE,
     "MOCHI_HOSTED_GATEWAY_AUTH_ROOT": _HOSTED_GATEWAY_AUTH_ROOT,
     "MOCHI_HOSTED_FILESYSTEM_ROOT": _HOSTED_FILESYSTEM_ROOT,
+    "MOCHI_HOSTED_MEMORY_ROOT": _HOSTED_MEMORY_ROOT,
+    "MOCHI_HOSTED_BROWSER_PROFILE_ROOT": _HOSTED_BROWSER_PROFILE_ROOT,
     "MOCHI_HOSTED_SCOPE_ASSERTION": _HOSTED_SCOPE_ASSERTION,
     "HERMES_CRON_AUTO_DELIVER_PLATFORM": _CRON_AUTO_DELIVER_PLATFORM,
     "HERMES_CRON_AUTO_DELIVER_CHAT_ID": _CRON_AUTO_DELIVER_CHAT_ID,
@@ -100,6 +104,8 @@ def set_session_vars(
     gateway_auth_scope: str = "",
     hosted_gateway_auth_root: str = "",
     hosted_filesystem_root: str = "",
+    hosted_memory_root: str = "",
+    hosted_browser_profile_root: str = "",
     hosted_scope_assertion: str = "",
 ) -> list:
     """Set all session context variables and return reset tokens.
@@ -122,6 +128,8 @@ def set_session_vars(
         _GATEWAY_AUTH_SCOPE.set(gateway_auth_scope),
         _HOSTED_GATEWAY_AUTH_ROOT.set(hosted_gateway_auth_root),
         _HOSTED_FILESYSTEM_ROOT.set(hosted_filesystem_root),
+        _HOSTED_MEMORY_ROOT.set(hosted_memory_root),
+        _HOSTED_BROWSER_PROFILE_ROOT.set(hosted_browser_profile_root),
         _HOSTED_SCOPE_ASSERTION.set(hosted_scope_assertion),
     ]
     return tokens
@@ -150,6 +158,8 @@ def clear_session_vars(tokens: list) -> None:
         _GATEWAY_AUTH_SCOPE,
         _HOSTED_GATEWAY_AUTH_ROOT,
         _HOSTED_FILESYSTEM_ROOT,
+        _HOSTED_MEMORY_ROOT,
+        _HOSTED_BROWSER_PROFILE_ROOT,
         _HOSTED_SCOPE_ASSERTION,
     ):
         var.set("")

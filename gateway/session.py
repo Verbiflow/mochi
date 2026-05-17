@@ -723,10 +723,12 @@ def build_session_key(
       - Without identifiers, messages fall back to one session per platform/chat_type.
     """
     platform = source.platform.value
-    if source.hosted_scope_id:
-        key_parts = ["agent:hosted", str(source.hosted_scope_id)]
-        if source.conversation_scope_id:
-            key_parts.append(str(source.conversation_scope_id))
+    hosted_scope_id = getattr(source, "hosted_scope_id", None)
+    if hosted_scope_id:
+        conversation_scope_id = getattr(source, "conversation_scope_id", None)
+        key_parts = ["agent:hosted", str(hosted_scope_id)]
+        if conversation_scope_id:
+            key_parts.append(str(conversation_scope_id))
         elif source.chat_id:
             key_parts.append(str(source.chat_id))
         if source.thread_id:
